@@ -1,0 +1,10 @@
+{
+	"mcpServers": {
+		"mnemonica-strategy": {
+			"command": "node",
+			"args": ["/code/mnemonica/strategy/lib/cli.js"],
+			"description": "Mnemonica Strategy - Runtime type graph access",
+			"env": {}
+		}
+	}
+}

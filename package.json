@@ -1,0 +1,43 @@
+{
+	"name": "@mnemonica/strategy",
+	"version": "0.1.0",
+	"description": "MCP server for Mnemonica runtime analysis via Chrome Debug Protocol",
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
+	"bin": {
+		"mnemonica-strategy": "./lib/cli.js"
+	},
+	"scripts": {
+		"build": "tsc",
+		"watch": "tsc --watch",
+		"test": "jest",
+		"test:coverage": "jest --coverage"
+	},
+	"keywords": [
+		"mnemonica",
+		"mcp",
+		"ai",
+		"inheritance",
+		"typescript",
+		"debug-protocol"
+	],
+	"author": "went.out@gmail.com",
+	"license": "MIT",
+	"peerDependencies": {
+		"mnemonica": "^0.x"
+	},
+	"devDependencies": {
+		"@modelcontextprotocol/sdk": "^0.x",
+		"@types/chrome-remote-interface": "^0.33.0",
+		"@types/jest": "^29.x",
+		"@types/node": "^20.x",
+		"chrome-remote-interface": "^0.33.x",
+		"jest": "^29.x",
+		"ts-jest": "^29.x",
+		"typescript": "^5.x"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^0.x",
+		"chrome-remote-interface": "^0.33.x"
+	}
+}
