@@ -19,10 +19,8 @@ export const StoreMeta = Symbol.for('StrategyMCP.meta');
  * Context passed to commands
  */
 export interface CommandExecContext {
-	require: NodeRequire;
-	args: Record<string, unknown>;
+	require: NodeJS.Require;
 	store: Map<string | symbol, unknown>;
-	[key: string]: unknown;
 }
 
 /**
@@ -33,7 +31,7 @@ export interface CommandExecContext {
  */
 async function executeCommand (
 	filePath: string,
-	args: Record<string, unknown>
+	args: unknown
 ): Promise<unknown> {
 	if (!fs.existsSync(filePath)) {
 		throw new Error(`Command file not found: ${filePath}`);
@@ -45,11 +43,11 @@ async function executeCommand (
 	// Build context - passed to command
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const g = global as Record<string, any>;
-	const ctx: CommandExecContext = {
+	const ctx: any = {
 		require,
+		store: g.StrategyMCP,
 		args,
-		store: g.StrategyMCP
-	};
+	} as unknown;
 
 	// If it has module.exports with run function, use require
 	if (isLocalCommand(code)) {
@@ -139,13 +137,12 @@ export class StrategyServer {
 									type: 'string',
 									description: 'Command name to execute',
 								},
-								args: {
-									type: 'object',
-									description: 'Command arguments',
-									additionalProperties: true,
+								message: {
+									type: 'string',
+									description: 'Command Message or string of arguments, or empty string',
 								},
 							},
-							required: ['context', 'command'],
+							required: ['context', 'command', 'message'],
 						},
 					},
 					{
@@ -190,11 +187,11 @@ export class StrategyServer {
 
 			switch (name) {
 				case 'execute': {
-					const { context, command, args: commandArgs = {} } = args as {
+					console.error('[SERVER DEBUG] request.params:', JSON.stringify(request.params));
+					const { context, command } = args as {
 						context: CommandContext;
 						command: string;
-						args?: Record<string, unknown>;
-					};
+					} & unknown;
 
 					if (!context || !command) {
 						return {
@@ -215,7 +212,7 @@ export class StrategyServer {
 
 					// Execute command
 					try {
-						const result = await executeCommand(filePath, commandArgs);
+						const result = await executeCommand(filePath, args);
 						return {
 							content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
 						};
