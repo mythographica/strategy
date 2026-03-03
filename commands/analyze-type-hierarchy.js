@@ -31,27 +31,23 @@
 		// Helper to safely get type name from constructor
 		function getTypeName (Constructor) {
 			try {
-				// Try SymbolConstructorName first
 				var symbols = Object.getOwnPropertySymbols(Constructor);
 				for (var i = 0; i < symbols.length; i++) {
 					if (symbols[i].toString() === 'Symbol(constructor-name)') {
 						return Constructor[symbols[i]];
 					}
 				}
-				// Fallback to name property
 				return Constructor.name || Constructor.TypeName;
 			} catch (e) {
 				return null;
 			}
 		}
 
-		// Helper to get subtypes Map from constructor
-		function getSubtypes (Constructor) {
+		// Helper to iterate subtypes using the Proxy API
+		function forEachSubtype (Constructor, callback) {
 			try {
-				return Constructor.subtypes;
-			} catch (e) {
-				return null;
-			}
+				Constructor.subtypes.forEach(callback);
+			} catch (e) {}
 		}
 
 		// Helper to get parent from constructor
@@ -71,7 +67,7 @@
 
 			var name = getTypeName(Constructor);
 			if (!name || typeMap[name]) {
-				return; // Skip if no name or already processed
+				return;
 			}
 
 			// Record this type
@@ -93,7 +89,6 @@
 			}
 
 			// Recursively discover subtypes
-			// Each Mnemonica type is also a collection with Proxy API
 			forEachSubtype(Constructor, function (subConstructor) {
 				discoverTypes(subConstructor, name, depth + 1);
 			});

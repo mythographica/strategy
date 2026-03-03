@@ -187,9 +187,86 @@ try {
 }
 ```
 
+## Mnemonica Patterns (CDP Context)
+
+### Accessing Types
+```javascript
+// Root types from defaultTypes
+var SyncBase = mnemonica.defaultTypes.lookup('SyncBase');
+// or direct access
+var SyncBase = mnemonica.defaultTypes.SyncBase;
+
+// Subtypes via lookup
+var SubAsync = SyncBase.lookup('SubAsync');
+// or direct access
+var SubAsync = SyncBase.SubAsync;
+```
+
+### Creating Types
+```javascript
+// Root type
+var MyType = mnemonica.defaultTypes.define('MyType', function (data) {
+    this.value = data ? data.value : 'default';
+});
+
+// Subtype
+var MySubType = MyType.define('MySubType', function (data) {
+    this.extra = data.extra;
+});
+```
+
+### Creating Instances (Proper Inheritance)
+```javascript
+// Create root instance
+var root = new SyncBase({ baseValue: 'test' });
+
+// Create child FROM parent instance
+var child = root.SubAsync({ delay: 100 });
+// NOT: new SubAsync(...) - that breaks Mnemonica inheritance!
+```
+
+### CDP Context Requirements
+- **Always use** `process.mainModule.require('module')` - regular `require()` fails in CDP
+- **Use** `process._rawDebug('message')` for logging to stdout
+- **Return** serializable JSON only
+
+## Node.js Inspector Learnings
+
+### Inspector is Singleton
+- Only **one inspector per process**
+- Can switch ports but cannot have multiple simultaneous:
+```javascript
+inspector.close();        // Close current
+inspector.open(9227);     // Open on new port
+```
+
+### Port 9229 vs 9227/9228
+- **9229**: Original inspector port - has access to NestJS global scope with mnemonica
+- **9227/9228**: Empty scope if opened via `inspector.open()` - not connected to application context
+- **Use 9229** for Strategy MCP connections to access the actual application types
+
+### Strategy
+1. Connect Strategy MCP to 9229
+2. Execute commands via CDP to manipulate Mnemonica types
+3. Create application-level servers (HTTP/TCP) on 9227/9228 if needed for other tools
+
+## Available MCP Resources
+
+### Context7 (Global)
+Documentation lookup MCP server with tools:
+- `resolve-library-id` - Find library ID by name
+- `query-docs` - Get documentation and code examples
+
+**Note:** mnemonica is not yet indexed in Context7. Use source code and AGENTS.md for reference.
+
+### Memory (Global)
+Knowledge graph for storing and retrieving information.
+
 ## Remember
 
 - **No rebuild needed** for command development
 - **dynamic_tool** is your gateway to all commands
 - **remote: true** for CDP, **remote: false** for local
 - **commands/** is your toolkit - extend it freely!
+- **Use .lookup()** for safe type access in CDP context
+- **Use process.mainModule.require()** in CDP-evaluated code

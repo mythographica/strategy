@@ -22,17 +22,19 @@
 	try {
 		// Get the type name from arguments
 		var typeName = (typeof _toolArgs !== 'undefined' && _toolArgs.typeName) ? _toolArgs.typeName : 'TestType';
-		
+
 		// Load mnemonica
 		var mnemonica = process.mainModule.require('mnemonica');
-		var define = mnemonica.define;
-		
-		// Create the new type
-		var NewType = define(typeName, function (data) {
-			this.message = data.message;
+
+		// Define constructor function using a named function for proper binding
+		function TestTypeConstructor (data) {
+			this.message = (data && data.message) ? data.message : 'default message';
 			this.createdAt = Date.now();
-		});
-		
+		}
+
+		// Use defaultTypes.define with the named function
+		var NewType = mnemonica.defaultTypes.define(typeName, TestTypeConstructor);
+
 		return {
 			success: true,
 			typeName: typeName,
@@ -41,10 +43,10 @@
 			isConstructor: typeof NewType === 'function'
 		};
 	} catch (e) {
-		return { 
-			success: false, 
-			error: e.message, 
-			stack: e.stack 
+		return {
+			success: false,
+			error: e.message,
+			stack: e.stack
 		};
 	}
-})()
+})();
