@@ -41,16 +41,46 @@ try {
 		delete global.__swaggerApiServer;
 	}
 
-	// Load all commands
-	var commandsDir = '/code/mnemonica/strategy/commands';
-	var files = fs.readdirSync(commandsDir).filter(function (f) {
-		return f.endsWith('.js');
-	});
+	// Load all commands from new 3-folder structure
+	var baseDir = '/code/mnemonica/strategy';
+	var commandDirs = [
+		{ path: path.join(baseDir, 'commands-mcp'), context: 'MCP' },
+		{ path: path.join(baseDir, 'commands-remote'), context: 'RPC' },
+		{ path: path.join(baseDir, 'commands-run'), context: 'RUN' }
+	];
 
 	var commands = {};
-	files.forEach(function (file) {
-		var filePath = path.join(commandsDir, file);
-		var content = fs.readFileSync(filePath, 'utf-8');
+	var allFiles = [];
+
+	// Recursively get all .js files from command directories
+	function getJsFiles(dir, basePath) {
+		var files = [];
+		try {
+			var items = fs.readdirSync(dir);
+			items.forEach(function (item) {
+				var fullPath = path.join(dir, item);
+				var stat = fs.statSync(fullPath);
+				if (stat.isDirectory()) {
+					files = files.concat(getJsFiles(fullPath, basePath));
+				} else if (item.endsWith('.js')) {
+					files.push(fullPath);
+				}
+			});
+		} catch (e) {
+			// Directory might not exist
+		}
+		return files;
+	}
+
+	commandDirs.forEach(function (dirInfo) {
+		var files = getJsFiles(dirInfo.path, dirInfo.path);
+		files.forEach(function (filePath) {
+			allFiles.push({ path: filePath, context: dirInfo.context });
+		});
+	});
+
+	allFiles.forEach(function (fileInfo) {
+		var content = fs.readFileSync(fileInfo.path, 'utf-8');
 
 		var metadataMatch = content.match(/\/\*\*\s*\n\s*\*\s*MCP Tool Metadata:\s*\n([\s\S]*?)\n\s*\*\//);
 
@@ -58,12 +88,14 @@ try {
 			try {
 				var jsonStr = metadataMatch[1].replace(/^\s*\*\s?/gm, '');
 				var metadata = JSON.parse(jsonStr);
-				var routeName = file.replace('.js', '').replace(/-/g, '_');
+				var fileName = path.basename(fileInfo.path);
+				var routeName = fileName.replace('.js', '').replace(/-/g, '_');
 				commands[routeName] = {
 					name: metadata.name,
 					description: metadata.description,
 					inputSchema: metadata.inputSchema,
-					file: file,
+					file: fileName,
+					context: fileInfo.context,
 					route: '/api/commands/' + routeName
 				};
 			} catch (e) {
