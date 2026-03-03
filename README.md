@@ -47,38 +47,164 @@ Add to `.roo/mcp.json`:
 }
 ```
 
-## Tools Provided
+## MCP Tools Provided
 
-### 1. `connect_to_runtime`
-Connect to a Node.js debug port.
+The Strategy MCP server exposes **3 bundled tools**:
 
-**Input:**
-- `host` (string, optional): Hostname, default "localhost"
-- `port` (number, optional): Debug port, default 9229
-
-### 2. `disconnect_from_runtime`
-Disconnect from the Node.js runtime.
-
-### 3. `get_runtime_types`
-Get Mnemonica types from the running application.
-
-### 4. `load_tactica_types`
-Load Tactica-generated types from `.tactica/types.ts`.
+### 1. `execute`
+Execute any command from the 3 context folders (MCP, RPC, RUN).
 
 **Input:**
-- `projectPath` (string, required): Path to project with .tactica folder
+- `context` (string, required): Execution context - "MCP", "RPC", or "RUN"
+- `command` (string, required): Command name to execute
+- `message` (string, optional): JSON string containing command arguments
 
-### 5. `compare_with_tactica`
-Compare runtime types with Tactica-generated types.
+**Example:**
+```javascript
+// Connect to NestJS debugger
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
+
+// Check connection status
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"status\" }"
+}
+
+// Get runtime types
+execute {
+  context: "RPC",
+  command: "get_runtime_types",
+  message: "{}"
+}
+```
+
+### 2. `list`
+List available commands by context.
 
 **Input:**
-- `projectPath` (string, required): Path to project
+- `context` (string, required): "MCP", "RPC", "RUN", or "ALL"
 
-### 6. `validate_tactica_output`
-Validate that Tactica output matches runtime.
+**Example:**
+```javascript
+list { context: "ALL" }
+```
+
+### 3. `help`
+Get detailed help for any command.
 
 **Input:**
-- `projectPath` (string, required): Path to project
+- `context` (string, required): Command context
+- `command` (string, required): Command name
+
+**Example:**
+```javascript
+help { context: "RPC", command: "connection" }
+```
+
+## Args Passing Mechanism (IMPORTANT)
+
+Due to MCP protocol limitations, command arguments must be passed as a **JSON string** in the `message` field, not as direct object properties.
+
+**Correct format:**
+```javascript
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
+```
+
+**Incorrect format (will not work):**
+```javascript
+// DON'T DO THIS
+execute {
+  context: "RPC",
+  command: "connection",
+  args: { action: "connect" }  // This won't work!
+}
+```
+
+## Common Commands
+
+### Connection Management
+
+```javascript
+// Connect to Node.js debugger
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
+
+// Check connection status
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"status\" }"
+}
+
+// Disconnect from runtime
+execute {
+  context: "RPC",
+  command: "connection",
+  message: "{ \"action\": \"disconnect\" }"
+}
+```
+
+### Type Analysis
+
+```javascript
+// Get runtime types from connected application
+execute {
+  context: "RPC",
+  command: "get_runtime_types",
+  message: "{}"
+}
+
+// Analyze type hierarchy
+execute {
+  context: "RPC",
+  command: "analyze_type_hierarchy",
+  message: "{}"
+}
+
+// Load Tactica-generated types
+execute {
+  context: "MCP",
+  command: "load_remote_tactica_types",
+  message: "{ \"projectPath\": \"/path/to/project\" }"
+}
+
+// Compare runtime vs Tactica types
+execute {
+  context: "MCP",
+  command: "compare_with_tactica",
+  message: "{ \"projectPath\": \"/path/to/project\" }"
+}
+```
+
+### Memory Management
+
+```javascript
+// Store memory in connected runtime
+execute {
+  context: "RPC",
+  command: "store_memory",
+  message: "{ \"key\": \"myKey\", \"data\": { ... } }"
+}
+
+// Recall memories
+execute {
+  context: "RPC",
+  command: "recall_memories",
+  message: "{ \"key\": \"myKey\" }"
+}
+```
 
 ## Example Workflow
 
@@ -88,11 +214,40 @@ Validate that Tactica output matches runtime.
    npm run start:debug
    ```
 
-2. Use the MCP tools to analyze:
-   - `connect_to_runtime` - Connect to localhost:9229
-   - `get_runtime_types` - See what Mnemonica types exist at runtime
-   - `compare_with_tactica` - Compare with generated types
-   - `validate_tactica_output` - Check for discrepancies
+2. Connect to the debugger:
+   ```javascript
+   execute {
+     context: "RPC",
+     command: "connection",
+     message: "{ \"action\": \"connect\" }"
+   }
+   ```
+
+3. Analyze runtime types:
+   ```javascript
+   execute {
+     context: "RPC",
+     command: "get_runtime_types",
+     message: "{}"
+   }
+   ```
+
+4. Compare with Tactica-generated types:
+   ```javascript
+   execute {
+     context: "MCP",
+     command: "compare_with_tactica",
+     message: "{ \"projectPath\": \"/path/to/project\" }"
+   }
+   ```
+
+## Command Contexts
+
+| Context | Folder | Execution Environment |
+|---------|--------|----------------------|
+| MCP | `commands-mcp/` | Local MCP server process |
+| RPC | `commands-remote/` | Remote via CDP in target Node.js |
+| RUN | `commands-run/` | HTTP endpoint in VS Code |
 
 ## Development
 
@@ -108,6 +263,44 @@ npm run watch
 
 # Test
 npm run test
+```
+
+## Creating Commands
+
+Commands are JavaScript files in the `commands-*/` folders with MCP Tool Metadata:
+
+```javascript
+/**
+ * MCP Tool Metadata:
+ * {
+ *   "name": "my_command",
+ *   "description": "What this command does",
+ *   "inputSchema": {
+ *     "type": "object",
+ *     "properties": {
+ *       "argName": { "type": "string" }
+ *     }
+ *   }
+ * }
+ */
+
+var { require, args, store } = ctx;
+
+// Parse message if present
+var commandArgs = args;
+if (args.message && typeof args.message === 'string') {
+  try {
+    commandArgs = JSON.parse(args.message);
+  } catch (e) {
+    return { success: false, error: 'Invalid JSON: ' + e.message };
+  }
+}
+
+// Access parsed arguments
+var myArg = commandArgs.argName;
+
+// Return result
+return { success: true, data: { ... } };
 ```
 
 ## License

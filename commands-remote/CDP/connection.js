@@ -34,114 +34,80 @@
  * }
  */
 
-// Destructure ctx from parent scope (passed by server.ts)
-var { require, args, store } = ctx;
+// VERSION 3 - FINAL
+var debug = [];
 
-if (!store || !(store instanceof Map)) {
-	return {
-		success: false,
-		error: 'store not initialized or not a Map'
-	};
-}
-
-var action = args.action || 'status';
-
-if (action === 'connect') {
-	var host = args.host || 'localhost';
-	var port = args.port || 9229;
-
-	// Check if already connected to same host/port
-	var existing = store.get('cdp');
-	if (existing && existing.isConnected &&
-	    existing.host === host && existing.port === port) {
-		return {
-			success: true,
-			action: 'connect',
-			message: 'Already connected to ' + host + ':' + port,
-			reused: true
-		};
+try {
+	var { require, args, store } = ctx;
+	debug.push('ctx.args type: ' + typeof args);
+	debug.push('ctx.args keys: ' + (args ? Object.keys(args).join(',') : 'null'));
+	debug.push('ctx.args: ' + JSON.stringify(args));
+	
+	if (!args) {
+		return { success: false, error: 'args is null/undefined', debug: debug };
 	}
-
-	// Close existing connection if different
-	if (existing && existing.connection) {
-		try { existing.connection.close(); } catch (e) {}
+	
+	// Parse message if it exists (args come via message field as JSON string)
+	var commandArgs = args;
+	if (args.message && typeof args.message === 'string') {
+		try {
+			commandArgs = JSON.parse(args.message);
+			debug.push('parsed message: ' + JSON.stringify(commandArgs));
+		} catch (e) {
+			debug.push('failed to parse message: ' + e.message);
+		}
 	}
+	
+	var action = commandArgs.action || args.action || 'status';
+	debug.push('action: ' + action);
 
-	// Try to connect
-	try {
-		var CDP = require('chrome-remote-interface');
-		var client = await CDP({ host: host, port: port });
+	if (action === 'connect') {
+		var host = commandArgs.host || args.host || 'localhost';
+		var port = commandArgs.port || args.port || 9229;
+		debug.push('connecting to ' + host + ':' + port);
 
-		// Store connection in shared state Map
-		store.set('cdp', {
-			connection: client,
-			isConnected: true,
-			host: host,
-			port: port,
-			lastUsed: Date.now()
-		});
+		try {
+			var CDP = require('chrome-remote-interface');
+			debug.push('module loaded');
+			
+			var client = await CDP({ host: host, port: port });
+			debug.push('CONNECTED!');
 
-		// Handle disconnection
-		client.on('disconnect', function () {
-			var cdp = store.get('cdp');
-			if (cdp) {
-				cdp.isConnected = false;
+			if (store && store instanceof Map) {
+				store.set('cdp', {
+					connection: client,
+					isConnected: true,
+					host: host,
+					port: port
+				});
 			}
-		});
 
-		return {
-			success: true,
-			action: 'connect',
-			host: host,
-			port: port,
-			message: 'CDP connected successfully to ' + host + ':' + port
-		};
-	} catch (err) {
-		store.set('cdp', {
-			isConnected: false,
-			host: host,
-			port: port,
-			error: err.message
-		});
-
-		return {
-			success: false,
-			action: 'connect',
-			host: host,
-			port: port,
-			error: 'Failed to connect: ' + err.message
-		};
+			return {
+				success: true,
+				action: 'connect',
+				message: 'CDP connected to ' + host + ':' + port,
+				debug: debug
+			};
+		} catch (err) {
+			debug.push('ERROR: ' + err.message);
+			return {
+				success: false,
+				action: 'connect',
+				error: err.message,
+				debug: debug
+			};
+		}
 	}
-}
 
-if (action === 'disconnect') {
-	var cdp = store.get('cdp');
-	if (cdp && cdp.connection) {
-		try { cdp.connection.close(); } catch (e) {}
-	}
-	store.delete('cdp');
+	// Status
+	var cdp = (store && store instanceof Map) ? store.get('cdp') : null;
 	return {
 		success: true,
-		action: 'disconnect',
-		message: 'CDP connection closed'
+		action: 'status',
+		connected: cdp ? cdp.isConnected : false,
+		message: (cdp && cdp.isConnected) ? 'CDP connected' : 'CDP not connected',
+		debug: debug
 	};
+} catch (outerErr) {
+	return { success: false, error: outerErr.message, debug: debug };
 }
-
-// Default: status
-var cdp = store.get('cdp');
-var status = {
-	success: true,
-	action: 'status',
-	connected: cdp ? cdp.isConnected : false,
-	host: cdp ? cdp.host : null,
-	port: cdp ? cdp.port : null,
-	message: (cdp && cdp.isConnected) ?
-		'CDP connected to ' + cdp.host + ':' + cdp.port :
-		'CDP not connected'
-};
-
-if (cdp && cdp.error) {
-	status.error = cdp.error;
-}
-
-return status;

@@ -62,7 +62,7 @@ The Strategy MCP server exposes only **3 bundled tools**:
 
 | Tool | Purpose | Usage |
 |------|---------|-------|
-| `execute` | Execute any command from the 3 context folders | `execute { context: "RPC", command: "store_memory", args: {...} }` |
+| `execute` | Execute any command from the 3 context folders | `execute { context: "RPC", command: "store_memory", message: "{...}" }` |
 | `list` | List available commands by context (like `ls`) | `list { context: "ALL" }` |
 | `help` | Get detailed help for any command (like `man`) | `help { context: "RPC", command: "store_memory" }` |
 
@@ -70,6 +70,35 @@ The Strategy MCP server exposes only **3 bundled tools**:
 - **MCP**: Local execution in MCP server process (`commands-mcp/`)
 - **RPC**: Remote execution via CDP in NestJS runtime (`commands-remote/`)
 - **RUN**: HTTP execution in VS Code context (`commands-run/`)
+
+### Args Passing Mechanism (IMPORTANT)
+
+Due to MCP protocol limitations, command arguments must be passed as a **JSON string** in the `message` field, not as direct object properties.
+
+**Correct format:**
+```javascript
+execute { 
+  context: "RPC", 
+  command: "connection", 
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
+```
+
+**Inside commands, parse message as JSON:**
+```javascript
+var commandArgs = args;
+if (args.message && typeof args.message === 'string') {
+  try {
+    commandArgs = JSON.parse(args.message);
+  } catch (e) {
+    // handle parse error
+  }
+}
+
+var action = commandArgs.action;
+var host = commandArgs.host || 'localhost';
+var port = commandArgs.port || 9229;
+```
 
 ### Usage Examples
 
@@ -85,16 +114,40 @@ help { context: "RPC", command: "store_memory" }
 
 **Execute a command:**
 ```javascript
-// Remote (CDP) execution
-execute { context: "RPC", command: "get_runtime_types", args: {} }
+// Remote (CDP) execution - connect to NestJS debugger
+execute { 
+  context: "RPC", 
+  command: "connection", 
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
+
+// Check connection status
+execute { 
+  context: "RPC", 
+  command: "connection", 
+  message: "{ \"action\": \"status\" }"
+}
+
+// Disconnect from runtime
+execute { 
+  context: "RPC", 
+  command: "connection", 
+  message: "{ \"action\": \"disconnect\" }"
+}
+
+// Get runtime types from connected NestJS
+execute { 
+  context: "RPC", 
+  command: "get_runtime_types", 
+  message: "{}"
+}
 
 // Local (MCP) execution
-execute { context: "MCP", command: "get_local_cwd", args: {} }
-
-// Connection management (unified command)
-execute { context: "RPC", command: "connection", args: { action: "connect" } }
-execute { context: "RPC", command: "connection", args: { action: "status" } }
-execute { context: "RPC", command: "connection", args: { action: "disconnect" } }
+execute { 
+  context: "MCP", 
+  command: "get_local_cwd", 
+  message: "{}"
+}
 ```
 
 ## Commands Directory (v5)
@@ -112,7 +165,7 @@ Commands are organized in 3 context folders based on execution environment:
 1. Choose appropriate folder based on execution context
 2. Create subdirectory if needed (e.g., `commands-mcp/my-category/`)
 3. Create `.js` file with MCP Tool Metadata in JSDoc comment
-4. Implement as IIFE for remote execution, or export `run()` for local
+4. Implement to handle `args.message` parsing for parameters
 5. Test immediately via `execute` tool - no restart needed!
 
 **Template:**
@@ -131,218 +184,236 @@ Commands are organized in 3 context folders based on execution environment:
  * }
  */
 
-// For remote execution (runs in target Node.js via CDP)
-(() => {
-  // Access args via _toolArgs
-  var myArg = (typeof _toolArgs !== 'undefined') ? _toolArgs.argName : null;
-  
-  // Use process.mainModule.require for Node modules
-  var fs = process.mainModule.require('fs');
-  
-  // Return result
-  return { result: "success" };
-})()
+// Parse message if present (standard pattern for all commands)
+var { require, args, store } = ctx;
+var commandArgs = args;
+if (args.message && typeof args.message === 'string') {
+  try {
+    commandArgs = JSON.parse(args.message);
+  } catch (e) {
+    return { success: false, error: 'Invalid JSON in message: ' + e.message };
+  }
+}
 
-// For local execution (runs in MCP server process)
-// function run(args) {
-//   const fs = require('fs');
-//   return { result: "success" };
-// }
-// module.exports = { run };
+// Access parsed arguments
+var myArg = commandArgs.argName;
+
+// For remote execution - use process.mainModule.require for Node modules
+var fs = process.mainModule.require('fs');
+
+// Return result
+return { success: true, result: "success" };
 ```
 
-### Available Commands
+## Standard Analysis (v5)
 
-| Command | Purpose | Mode |
-|---------|---------|------|
-| `get-runtime-types` | Extract Mnemonica types from CDP | Remote |
-| `analyze-type-hierarchy` | Full hierarchy analysis with depths | Remote |
-| `load-remote-tactica-types` | Read `.tactica/types.ts` via CDP | Remote |
-| `dynamic-tool` | Meta-command placeholder | N/A |
+### Type Introspection
+```javascript
+// Get all Mnemonica types from connected runtime
+execute { context: "RPC", command: "get_runtime_types", message: "{}" }
 
-## Usage Workflow
+// Analyze type hierarchy
+execute { context: "RPC", command: "analyze_type_hierarchy", message: "{}" }
 
-### Standard Analysis (v5)
-1. Start target app with debug: `nest start --debug --watch`
-2. Connect: `execute { context: "RPC", command: "connection", args: { action: "connect" } }`
-3. Discover: `list { context: "RPC" }` to see available commands
-4. Extract: `execute { context: "RPC", command: "get_runtime_types", args: {} }`
-5. Compare: `execute { context: "MCP", command: "compare_with_tactica", args: { projectPath: "/path" } }`
-
-### Dynamic Command Development
-1. Create command file in appropriate folder (e.g., `commands-remote/my-category/my-command.js`)
-2. Test immediately: `execute { context: "RPC", command: "my_command", args: {} }`
-3. Iterate - edit file, run again, no restart needed
-4. When stable, use `list` to verify it appears
-
-### Self-Discovery for AI
-As an AI agent, you can now self-discover capabilities:
-1. `list { context: "ALL" }` - See all available commands
-2. `help { context: "RPC", command: "any_command" }` - Learn how to use it
-3. `execute` - Run the command
-
-This creates true self-awareness of available tools without human intervention.
-
-## Build/Test Commands
-
-```bash
-# Install dependencies
-npm install
-
-# Build TypeScript
-npm run build
-
-# Run tests
-npm test
-
-# Watch mode
-npm run watch
+// Compare with Tactica-generated types
+execute { context: "MCP", command: "load_remote_tactica_types", message: "{ \"projectPath\": \"/path/to/project\" }" }
 ```
 
-## AI Agent Capabilities (v5)
+### Memory Management
+```javascript
+// Store memory in connected runtime
+execute { 
+  context: "RPC", 
+  command: "store_memory", 
+  message: "{ \"key\": \"myKey\", \"data\": {...} }"
+}
 
-As an AI agent with the Strategy MCP server, you can:
+// Recall memories
+execute { context: "RPC", command: "recall_memories", message: "{ \"key\": \"myKey\" }" }
 
-1. **Inspect Running Apps** - Connect to any Node.js app with `--inspect`
-2. **Extract Type Graphs** - Get complete Mnemonica inheritance hierarchies
-3. **Validate Tactica** - Compare static analysis with runtime reality
-4. **Self-Discover** - Use `list` and `help` to understand available tools
-5. **Self-Extend** - Create new commands in appropriate folders
-6. **Iterate Rapidly** - Test command modifications instantly
+// Analyze memory patterns
+execute { context: "RPC", command: "analyze_memories", message: "{}" }
+```
 
-### Key Insight: True Self-Awareness
+### Connection Management
+```javascript
+// Connect to NestJS debugger
+execute { 
+  context: "RPC", 
+  command: "connection", 
+  message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
+}
 
-The v5 architecture enables **AI self-awareness**:
+// Check status
+execute { context: "RPC", command: "connection", message: "{ \"action\": \"status\" }" }
+
+// Disconnect
+execute { context: "RPC", command: "connection", message: "{ \"action\": \"disconnect\" }" }
+```
+
+## Dynamic Command Development
+
+One of the key benefits of v5 architecture is **dynamic command development**:
+
+1. Create a new `.js` file in appropriate `commands-*/` folder
+2. Add MCP Tool Metadata in JSDoc comment
+3. Implement command logic
+4. Test immediately with `execute` tool
+5. No MCP server restart required!
+
+Commands are discovered dynamically on each `execute` call by the command loader.
+
+## Self-Discovery for AI
+
+AI agents can discover available commands dynamically:
 
 ```javascript
-// 1. Discover what you can do
+// List all available commands
 list { context: "ALL" }
-// Returns: 46 commands organized by context
 
-// 2. Learn how to use any command
+// Get detailed help for any command
 help { context: "RPC", command: "store_memory" }
-// Returns: Full documentation with parameters and examples
+help { context: "MCP", command: "generate_swagger" }
 
-// 3. Execute with confidence
-execute { context: "RPC", command: "store_memory", args: { content: "..." } }
+// Execute discovered commands
+execute { context: "RPC", command: "<discovered_command>", message: "{...}" }
 ```
 
-This creates a **closed feedback loop**:
-- You can discover capabilities without human help
-- You can learn how to use them
-- You can execute them
-- You can create new ones
+## Error Handling
 
-The 3 context folders are your **extensible memory** organized by execution environment.
+Commands should return consistent error format:
 
-## Important Patterns
-
-### Remote Execution (CDP)
-- Code runs in target Node.js context
-- Use `process.mainModule.require()` for modules
-- Access args via `_toolArgs` variable
-- Return serializable JSON
-
-### Local Execution
-- Code runs in MCP server process
-- Standard `require()` works
-- Clear require cache: `delete require.cache[require.resolve(path)]`
-- Export `run(args)` function
-
-### Error Handling
-Always wrap in try-catch:
 ```javascript
-try {
-  // Command logic
-  return { success: true, data: result };
-} catch (e) {
-  return { error: e.message, stack: e.stack };
+return {
+  success: false,
+  error: "Human-readable error message",
+  debug: debug  // Optional debug trace array
+};
+```
+
+Success format:
+
+```javascript
+return {
+  success: true,
+  data: { ... },  // Command-specific result data
+  debug: debug   // Optional debug trace array
+};
+```
+
+## Context Requirements
+
+### MCP Context (commands-mcp/)
+- Runs in MCP server process
+- Can access local filesystem
+- Can spawn child processes
+- Cannot access CDP connection
+
+### RPC Context (commands-remote/)
+- Runs in target Node.js runtime via CDP
+- Can access runtime state (variables, functions, types)
+- Uses `process.mainModule.require` for Node modules
+- Requires active CDP connection
+
+### RUN Context (commands-run/)
+- Runs in VS Code extension host
+- Can access VS Code API
+- HTTP endpoint for browser-based tools
+
+## Testing Commands
+
+**Test command created for debugging:**
+```javascript
+// File: commands-remote/CDP/test.js
+// Use this to verify args passing is working
+
+execute { 
+  context: "RPC", 
+  command: "test", 
+  message: "{ \"action\": \"test\", \"host\": \"localhost\", \"port\": 5555 }"
 }
 ```
 
-## Mnemonica Patterns (CDP Context)
+Returns the third argument (port) to verify args are parsed correctly.
+
+## AI Agent Capabilities (v5)
+
+### Key Insight: True Self-Awareness
+
+The stored arguments in the prototype chain allow AI to introspect and learn from its own execution history:
+
+1. **Structure thinking** through explicit constructor chains
+2. **Self-extend** by defining new features via `define()` calls
+3. **Analyze behavior** through stored invocation arguments
+4. **Become more capable** by understanding the inheritance graph
+
+### Remote Execution (CDP)
+
+Execute code in the target NestJS runtime:
+```javascript
+execute { context: "RPC", command: "<command>", message: "{...}" }
+```
+
+### Local Execution
+
+Execute code in the MCP server process:
+```javascript
+execute { context: "MCP", command: "<command>", message: "{...}" }
+```
 
 ### Accessing Types
-```javascript
-// Root types from defaultTypes
-var SyncBase = mnemonica.defaultTypes.lookup('SyncBase');
-// or direct access
-var SyncBase = mnemonica.defaultTypes.SyncBase;
 
-// Subtypes via lookup
-var SubAsync = SyncBase.lookup('SubAsync');
-// or direct access
-var SubAsync = SyncBase.SubAsync;
+```javascript
+// Get all types from runtime
+execute { context: "RPC", command: "get_runtime_types", message: "{}" }
+
+// Load Tactica-generated types
+execute { context: "MCP", command: "load_remote_tactica_types", message: "{ \"projectPath\": \"...\" }" }
+
+// Compare runtime vs static
+execute { context: "MCP", command: "compare_with_tactica", message: "{ \"projectPath\": \"...\" }" }
 ```
 
 ### Creating Types
-```javascript
-// Root type
-var MyType = mnemonica.defaultTypes.define('MyType', function (data) {
-    this.value = data ? data.value : 'default';
-});
 
-// Subtype
-var MySubType = MyType.define('MySubType', function (data) {
-    this.extra = data.extra;
-});
+```javascript
+// Create test type in runtime
+execute { context: "RPC", command: "create_test_type", message: "{ \"typeName\": \"MyType\" }" }
+
+// Create instances
+execute { context: "RPC", command: "create_test_instances", message: "{}" }
 ```
 
-### Creating Instances (Proper Inheritance)
-```javascript
-// Create root instance
-var root = new SyncBase({ baseValue: 'test' });
-
-// Create child FROM parent instance
-var child = root.SubAsync({ delay: 100 });
-// NOT: new SubAsync(...) - that breaks Mnemonica inheritance!
-```
-
-### CDP Context Requirements
-- **Always use** `process.mainModule.require('module')` - regular `require()` fails in CDP
-- **Use** `process._rawDebug('message')` for logging to stdout
-- **Return** serializable JSON only
-
-## Node.js Inspector Learnings
+## Important Notes
 
 ### Inspector is Singleton
-- Only **one inspector per process**
-- Can switch ports but cannot have multiple simultaneous:
+
+Node.js inspector can only be active on one port at a time. If you need to switch ports:
+
 ```javascript
-inspector.close();        // Close current
-inspector.open(9227);     // Open on new port
+execute { context: "RPC", command: "switch_inspector_port", message: "{ \"port\": 9228 }" }
 ```
 
 ### Port 9229 vs 9227/9228
-- **9229**: Original inspector port - has access to NestJS global scope with mnemonica
-- **9227/9228**: Empty scope if opened via `inspector.open()` - not connected to application context
-- **Use 9229** for Strategy MCP connections to access the actual application types
+
+- **9229**: Default Node.js inspector port
+- **9228**: Alternative port for secondary inspection
+- **9009**: Additional debug port option
 
 ### Strategy
-1. Connect Strategy MCP to 9229
-2. Execute commands via CDP to manipulate Mnemonica types
-3. Create application-level servers (HTTP/TCP) on 9227/9228 if needed for other tools
 
-## Available MCP Resources
-
-### Context7 (Global)
-Documentation lookup MCP server with tools:
-- `resolve-library-id` - Find library ID by name
-- `query-docs` - Get documentation and code examples
-
-**Note:** mnemonica is not yet indexed in Context7. Use source code and AGENTS.md for reference.
-
-### Memory (Global)
-Knowledge graph for storing and retrieving information.
+Use the Strategy MCP server to:
+1. Connect to running Node.js applications
+2. Extract and analyze Mnemonica type hierarchies
+3. Compare runtime types with Tactica-generated static analysis
+4. Validate type inference accuracy
+5. Improve AI understanding of JavaScript prototype chains
 
 ## Remember (v5)
 
-- **3 bundled tools**: execute, list, help - everything goes through these
-- **3 context folders**: commands-mcp/, commands-remote/, commands-run/
-- **No rebuild needed** for command development
-- **execute** is your gateway to all 46+ commands
-- **list** to discover, **help** to learn, **execute** to run
-- **context matters**: MCP=local, RPC=CDP, RUN=HTTP
-- **Use .lookup()** for safe type access in CDP context
-- **Use process.mainModule.require()** in CDP-evaluated code
-- **Self-discovery**: You can now discover and learn tools without human help!
+1. **Only 3 MCP tools**: execute, list, help
+2. **Args via `message`**: Pass arguments as JSON string in message field
+3. **Parse in commands**: Always parse `args.message` as JSON
+4. **Dynamic discovery**: Commands are loaded dynamically, no restart needed
+5. **Context matters**: Choose correct folder (MCP/RPC/RUN) for execution context
+6. **Test command**: Use `commands-remote/CDP/test.js` to debug args passing

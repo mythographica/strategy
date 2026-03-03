@@ -6,10 +6,8 @@ export declare const StoreMeta: unique symbol;
  * Context passed to commands
  */
 export interface CommandExecContext {
-    require: NodeRequire;
-    args: Record<string, unknown>;
+    require: NodeJS.Require;
     store: Map<string | symbol, unknown>;
-    [key: string]: unknown;
 }
 /**
  * Strategy MCP Server
