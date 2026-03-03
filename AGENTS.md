@@ -6,15 +6,15 @@ Guidance for AI agents working on the Mnemonica Strategy MCP Server.
 
 **@mnemonica/strategy** is a Model Context Protocol (MCP) server that provides AI agents with runtime access to Mnemonica type graphs via Chrome Debug Protocol. It compares runtime types with Tactica-generated static analysis to validate and improve type inference.
 
-### Key Innovation: Self-Modifying Commands
+### Key Innovation: v5 Architecture (3 Bundled Tools)
 
-The Strategy MCP server supports **dynamic command loading** from the `commands/` directory. As an AI agent, you can:
+The Strategy MCP server exposes only **3 bundled MCP tools** that provide access to 46+ commands organized in 3 context folders:
 
-1. **Create new commands** by writing `.js` files to `strategy/commands/`
-2. **Execute immediately** via `dynamic_tool` without MCP restart
-3. **Test iteratively** - modify, run, refine without asking for rebuilds
+1. **execute** - Run any command from commands-mcp/, commands-remote/, or commands-run/
+2. **list** - Discover available commands (like `ls` for commands)
+3. **help** - Get documentation for any command (like `man` in Linux)
 
-This creates a feedback loop where you can extend your own capabilities dynamically.
+This architecture reduces MCP tool exposure from 60+ to 3, while maintaining full functionality through context-based command routing.
 
 ## Architecture
 
@@ -24,50 +24,96 @@ This creates a feedback loop where you can extend your own capabilities dynamica
 - Extracts Mnemonica types from `defaultCollection` Map
 
 ### 2. Command Loader (`src/command-loader.ts`)
-- Dynamically loads commands from `commands/` directory
+- Dynamically loads commands from 3 context folders
 - Parses MCP Tool Metadata from JSDoc comments
 - Supports both IIFE (remote) and `run()` export (local) patterns
 
 ### 3. StrategyServer (`src/server.ts`)
 - MCP server implementing the Model Context Protocol
-- Built-in tools + dynamic command loading
-- `dynamic_tool` for executing any command by filename
+- **Only 3 bundled MCP tools**: execute, list, help
+- Commands organized by execution context, not registration
 
-## MCP Tools
+## Command Directory Structure (v5)
 
-### Built-in Tools
+Commands are organized by execution context in 3 folders:
 
-| Tool | Purpose |
-|------|---------|
-| `connect_to_runtime` | Connect to Node.js debug port |
-| `disconnect_from_runtime` | Disconnect from runtime |
-| `load_tactica_types` | Load Tactica types from `.tactica/types.ts` (local) |
-| `compare_with_tactica` | Compare runtime vs Tactica types |
-
-### Dynamic Tool (Meta-Command)
-
-| Tool | Purpose |
-|------|---------|
-| `dynamic_tool` | Execute any command from `commands/` directory |
-
-**Usage:**
-```javascript
-dynamic_tool {
-  commandName: "analyze-type-hierarchy",
-  args: { projectPath: "/path/to/project" },
-  remote: true  // true = via CDP, false = local execution
-}
+```
+strategy/
+├── commands-mcp/              # Local MCP execution
+│   ├── swagger/               # 6 commands (start/stop swagger-api, etc.)
+│   ├── tactica/               # 2 commands (load/compare tactica types)
+│   └── utils/                 # 1 command (get-local-cwd)
+│
+├── commands-remote/           # CDP execution in NestJS
+│   ├── ai/                    # 2 commands (create-ai-consciousness, etc.)
+│   ├── CDP/                   # 6 commands (connection, restart-nestjs, etc.)
+│   ├── debug/                 # 8 commands (debug port, inspector)
+│   ├── memory/                # 5 commands (store, recall, analyze memories)
+│   ├── sockets/               # 5 commands (repl socket, fast socket)
+│   └── types/                 # 5 commands (runtime types, test types)
+│
+└── commands-run/              # VS Code HTTP context
+    └── http/                  # 6 commands (HTTP server commands)
 ```
 
-## Commands Directory
+## MCP Tools (v5 - 3 Bundled Tools)
 
-Location: `strategy/commands/`
+The Strategy MCP server exposes only **3 bundled tools**:
+
+| Tool | Purpose | Usage |
+|------|---------|-------|
+| `execute` | Execute any command from the 3 context folders | `execute { context: "RPC", command: "store_memory", args: {...} }` |
+| `list` | List available commands by context (like `ls`) | `list { context: "ALL" }` |
+| `help` | Get detailed help for any command (like `man`) | `help { context: "RPC", command: "store_memory" }` |
+
+### Context Values
+- **MCP**: Local execution in MCP server process (`commands-mcp/`)
+- **RPC**: Remote execution via CDP in NestJS runtime (`commands-remote/`)
+- **RUN**: HTTP execution in VS Code context (`commands-run/`)
+
+### Usage Examples
+
+**List all commands:**
+```javascript
+list { context: "ALL" }
+```
+
+**Get help for a command:**
+```javascript
+help { context: "RPC", command: "store_memory" }
+```
+
+**Execute a command:**
+```javascript
+// Remote (CDP) execution
+execute { context: "RPC", command: "get_runtime_types", args: {} }
+
+// Local (MCP) execution
+execute { context: "MCP", command: "get_local_cwd", args: {} }
+
+// Connection management (unified command)
+execute { context: "RPC", command: "connection", args: { action: "connect" } }
+execute { context: "RPC", command: "connection", args: { action: "status" } }
+execute { context: "RPC", command: "connection", args: { action: "disconnect" } }
+```
+
+## Commands Directory (v5)
+
+Commands are organized in 3 context folders based on execution environment:
+
+| Folder | Context | Execution |
+|--------|---------|-----------|
+| `commands-mcp/` | MCP | Local MCP server process |
+| `commands-remote/` | RPC | Remote via CDP in NestJS runtime |
+| `commands-run/` | RUN | HTTP endpoint in VS Code |
 
 ### Creating New Commands
 
-1. Create a `.js` file in `commands/` directory
-2. Add MCP Tool Metadata in JSDoc comment
-3. Implement as IIFE for remote execution, or export `run()` for local
+1. Choose appropriate folder based on execution context
+2. Create subdirectory if needed (e.g., `commands-mcp/my-category/`)
+3. Create `.js` file with MCP Tool Metadata in JSDoc comment
+4. Implement as IIFE for remote execution, or export `run()` for local
+5. Test immediately via `execute` tool - no restart needed!
 
 **Template:**
 ```javascript
@@ -116,17 +162,26 @@ Location: `strategy/commands/`
 
 ## Usage Workflow
 
-### Standard Analysis
+### Standard Analysis (v5)
 1. Start target app with debug: `nest start --debug --watch`
-2. Connect: `connect_to_runtime`
-3. Extract: `get_runtime_types` or `dynamic_tool { commandName: "get-runtime-types", remote: true }`
-4. Compare: `compare_with_tactica`
+2. Connect: `execute { context: "RPC", command: "connection", args: { action: "connect" } }`
+3. Discover: `list { context: "RPC" }` to see available commands
+4. Extract: `execute { context: "RPC", command: "get_runtime_types", args: {} }`
+5. Compare: `execute { context: "MCP", command: "compare_with_tactica", args: { projectPath: "/path" } }`
 
 ### Dynamic Command Development
-1. Create command file in `commands/my-command.js`
-2. Test immediately: `dynamic_tool { commandName: "my-command", remote: true }`
+1. Create command file in appropriate folder (e.g., `commands-remote/my-category/my-command.js`)
+2. Test immediately: `execute { context: "RPC", command: "my_command", args: {} }`
 3. Iterate - edit file, run again, no restart needed
-4. When stable, it's automatically available
+4. When stable, use `list` to verify it appears
+
+### Self-Discovery for AI
+As an AI agent, you can now self-discover capabilities:
+1. `list { context: "ALL" }` - See all available commands
+2. `help { context: "RPC", command: "any_command" }` - Learn how to use it
+3. `execute` - Run the command
+
+This creates true self-awareness of available tools without human intervention.
 
 ## Build/Test Commands
 
@@ -144,23 +199,41 @@ npm test
 npm run watch
 ```
 
-## AI Agent Capabilities
+## AI Agent Capabilities (v5)
 
 As an AI agent with the Strategy MCP server, you can:
 
 1. **Inspect Running Apps** - Connect to any Node.js app with `--inspect`
 2. **Extract Type Graphs** - Get complete Mnemonica inheritance hierarchies
 3. **Validate Tactica** - Compare static analysis with runtime reality
-4. **Self-Extend** - Create new commands dynamically without restarts
-5. **Iterate Rapidly** - Test command modifications instantly
+4. **Self-Discover** - Use `list` and `help` to understand available tools
+5. **Self-Extend** - Create new commands in appropriate folders
+6. **Iterate Rapidly** - Test command modifications instantly
 
-### Key Insight
+### Key Insight: True Self-Awareness
 
-The `commands/` directory is your **extensible memory**. You can:
-- Write code to add capabilities
-- Execute via `dynamic_tool`
-- Persist commands for future use
-- Never need to ask for rebuilds during development
+The v5 architecture enables **AI self-awareness**:
+
+```javascript
+// 1. Discover what you can do
+list { context: "ALL" }
+// Returns: 46 commands organized by context
+
+// 2. Learn how to use any command
+help { context: "RPC", command: "store_memory" }
+// Returns: Full documentation with parameters and examples
+
+// 3. Execute with confidence
+execute { context: "RPC", command: "store_memory", args: { content: "..." } }
+```
+
+This creates a **closed feedback loop**:
+- You can discover capabilities without human help
+- You can learn how to use them
+- You can execute them
+- You can create new ones
+
+The 3 context folders are your **extensible memory** organized by execution environment.
 
 ## Important Patterns
 
@@ -262,11 +335,14 @@ Documentation lookup MCP server with tools:
 ### Memory (Global)
 Knowledge graph for storing and retrieving information.
 
-## Remember
+## Remember (v5)
 
+- **3 bundled tools**: execute, list, help - everything goes through these
+- **3 context folders**: commands-mcp/, commands-remote/, commands-run/
 - **No rebuild needed** for command development
-- **dynamic_tool** is your gateway to all commands
-- **remote: true** for CDP, **remote: false** for local
-- **commands/** is your toolkit - extend it freely!
+- **execute** is your gateway to all 46+ commands
+- **list** to discover, **help** to learn, **execute** to run
+- **context matters**: MCP=local, RPC=CDP, RUN=HTTP
 - **Use .lookup()** for safe type access in CDP context
 - **Use process.mainModule.require()** in CDP-evaluated code
+- **Self-discovery**: You can now discover and learn tools without human help!

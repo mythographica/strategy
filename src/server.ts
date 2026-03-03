@@ -8,78 +8,72 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { CDPConnection } from './cdp-connection';
-import { TacticaComparison } from './tactica-comparison';
-import { getToolDefinitions, getCommandCode } from './command-loader';
+import { loadCommands, listCommands, getCommandHelp, getCommandPath, isLocalCommand, type CommandContext } from './command-loader';
 
 /**
- * Execute a command locally
+ * Execute a command locally (MCP context)
  * For remote-style commands (IIFE), we read the file and wrap it
  * For local-style commands (module.exports), we require them
- * @param commandName - Name of the command file (without .js)
+ * @param filePath - Full path to command file
  * @param args - Arguments to pass to the command
  * @returns Result of the command execution
  */
-async function executeLocalCommand (commandName: string, args: Record<string, unknown>): Promise<unknown> {
-	const commandsDir = path.join(__dirname, '..', 'commands');
-	const filePath = path.join(commandsDir, `${commandName}.js`);
-	
+async function executeLocalCommand (filePath: string, args: Record<string, unknown>): Promise<unknown> {
 	if (!fs.existsSync(filePath)) {
 		throw new Error(`Command file not found: ${filePath}`);
 	}
-	
+
 	// Read the code first to check pattern
 	const code = fs.readFileSync(filePath, 'utf-8');
-	
-	// If it has module.exports, use require
-	if (code.includes('module.exports')) {
+
+	// If it has module.exports with run function, use require
+	if (isLocalCommand(code)) {
 		// Clear require cache to allow reloading
 		delete require.cache[require.resolve(filePath)];
-		
+
 		// Require the module
 		// eslint-disable-next-line @typescript-eslint/no-var-requires
 		const commandModule = require(filePath);
-		
+
 		if (typeof commandModule.run === 'function') {
 			return await commandModule.run(args);
 		}
-		
-		throw new Error(`Command '${commandName}' does not export a 'run' function`);
+
+		throw new Error(`Command does not export a 'run' function`);
 	}
-	
+
 	// Otherwise, treat as remote-style IIFE command
 	// Wrap it to capture the result
 	const wrappedCode = `
 		var _toolArgs = ${JSON.stringify(args)};
 		${code}
 	`;
-	
+
 	// Execute in a sandbox-like way using Function
 	const fn = new Function(wrappedCode);
 	const result = fn();
-	
+
 	// If it's an async IIFE returning a promise, await it
 	if (result && typeof result.then === 'function') {
 		return await result;
 	}
-	
+
 	return result;
 }
 
 /**
  * Strategy MCP Server
  * Provides AI agents with runtime Mnemonica analysis via Chrome Debug Protocol
+ * Refactored to expose only 3 bundled tools: execute, list, help
  */
 export class StrategyServer {
 	private server: Server;
-	private cdpConnection: CDPConnection;
-	private tacticaComparison: TacticaComparison;
 
 	constructor () {
 		this.server = new Server(
 			{
 				name: '@mnemonica/strategy',
-				version: '0.1.0',
+				version: '0.2.0',
 			},
 			{
 				capabilities: {
@@ -88,91 +82,73 @@ export class StrategyServer {
 			}
 		);
 
-		this.cdpConnection = new CDPConnection('localhost', 9229);
-		this.tacticaComparison = new TacticaComparison();
-
 		this.setupToolHandlers();
 	}
 
 	private setupToolHandlers (): void {
-		// List available tools - dynamically loaded from commands/ directory + built-ins
+		// List available tools - only 3 bundled tools
 		this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-			// Built-in tools that don't need runtime evaluation
-			const builtInTools = [
+			const tools = [
 				{
-					name: 'connect_to_runtime',
-					description: 'Connect to Node.js debug runtime (default: localhost:9229)',
+					name: 'execute',
+					description: 'Execute a command from commands-mcp, commands-remote, or commands-run folders',
 					inputSchema: {
 						type: 'object',
 						properties: {
-							host: { type: 'string', default: 'localhost' },
-							port: { type: 'number', default: 9229 },
-						},
-					},
-				},
-				{
-					name: 'disconnect_from_runtime',
-					description: 'Disconnect from Node.js runtime',
-					inputSchema: { type: 'object', properties: {} },
-				},
-				{
-					name: 'load_tactica_types',
-					description: 'Load Tactica-generated types from .tactica folder',
-					inputSchema: {
-						type: 'object',
-						properties: {
-							projectPath: {
+							context: {
 								type: 'string',
-								description: 'Path to project with .tactica folder',
+								enum: ['MCP', 'RPC', 'RUN'],
+								description: 'MCP=local, RPC=remote/CDP, RUN=VS Code HTTP',
 							},
-						},
-						required: ['projectPath'],
-					},
-				},
-				{
-					name: 'compare_with_tactica',
-					description: 'Compare runtime types with Tactica-generated types',
-					inputSchema: {
-						type: 'object',
-						properties: {
-							projectPath: {
+							command: {
 								type: 'string',
-								description: 'Path to project with .tactica folder',
-							},
-						},
-						required: ['projectPath'],
-					},
-				},
-				{
-					name: 'dynamic_tool',
-					description: 'Execute any command from the commands directory by filename (locally or remotely)',
-					inputSchema: {
-						type: 'object',
-						properties: {
-							commandName: {
-								type: 'string',
-								description: 'Name of the command file to execute (without .js extension)',
+								description: 'Command filename without .js extension',
 							},
 							args: {
 								type: 'object',
-								description: 'Arguments to pass to the command',
-							},
-							remote: {
-								type: 'boolean',
-								description: 'Execute remotely via CDP (requires connect_to_runtime). Default: false (local execution)',
+								description: 'Arguments passed to the command',
 							},
 						},
-						required: ['commandName'],
+						required: ['context', 'command'],
+					},
+				},
+				{
+					name: 'list',
+					description: 'List available commands by context (like ls for commands)',
+					inputSchema: {
+						type: 'object',
+						properties: {
+							context: {
+								type: 'string',
+								enum: ['MCP', 'RPC', 'RUN', 'ALL'],
+								default: 'ALL',
+								description: 'Which context to list commands from',
+							},
+						},
+					},
+				},
+				{
+					name: 'help',
+					description: 'Get detailed help for any command including description, parameters, and examples (like man in Linux)',
+					inputSchema: {
+						type: 'object',
+						properties: {
+							context: {
+								type: 'string',
+								enum: ['MCP', 'RPC', 'RUN'],
+								description: 'Which command folder',
+							},
+							command: {
+								type: 'string',
+								description: 'Command name to get help for',
+							},
+						},
+						required: ['context', 'command'],
 					},
 				},
 			];
 
-			// Dynamically loaded tools from commands/ directory
-			const dynamicTools = getToolDefinitions();
-
-			return {
-				tools: [...builtInTools, ...dynamicTools],
-			};
+			return { tools };
 		});
 
 		// Handle tool calls
@@ -180,108 +156,50 @@ export class StrategyServer {
 			const { name, arguments: args } = request.params;
 
 			switch (name) {
-				case 'connect_to_runtime': {
-					const { host = 'localhost', port = 9229 } = args as { host?: string; port?: number };
-					this.cdpConnection = new CDPConnection(host, port);
-					await this.cdpConnection.connect();
-					return {
-						content: [{ type: 'text', text: `Connected to ${host}:${port}` }],
+				case 'execute': {
+					const { context, command, args: commandArgs = {} } = args as {
+						context: CommandContext;
+						command: string;
+						args?: Record<string, unknown>;
 					};
-				}
 
-				case 'disconnect_from_runtime': {
-					await this.cdpConnection.disconnect();
-					return {
-						content: [{ type: 'text', text: 'Disconnected from runtime' }],
-					};
-				}
-
-				case 'load_tactica_types': {
-					const { projectPath } = args as { projectPath: string };
-					const types = this.tacticaComparison.loadTacticaTypes(projectPath);
-					return {
-						content: [{ type: 'text', text: JSON.stringify(types, null, 2) }],
-					};
-				}
-
-				case 'compare_with_tactica': {
-					const { projectPath } = args as { projectPath: string };
-
-					if (!this.cdpConnection.isConnected()) {
+					if (!context || !command) {
 						return {
-							content: [
-								{
-									type: 'text',
-									text: 'Error: Not connected to runtime. Use connect_to_runtime first.',
-								},
-							],
+							content: [{ type: 'text', text: 'Error: context and command are required' }],
 							isError: true,
 						};
 					}
 
-					const runtimeTypes = await this.cdpConnection.getMnemonicaTypes();
-					const tacticaTypes = this.tacticaComparison.loadTacticaTypes(projectPath);
-					const comparison = this.tacticaComparison.compare(
-						runtimeTypes as Record<string, unknown>,
-						tacticaTypes
-					);
+					// Get command file path
+					const filePath = getCommandPath(context, command);
 
-					return {
-						content: [
-							{
-								type: 'text',
-								text: this.tacticaComparison.generateReport(comparison),
-							},
-						],
-					};
-				}
-
-				case 'dynamic_tool': {
-					const { commandName, args: dynamicArgs = {}, remote = false } = args as { commandName: string; args?: Record<string, unknown>; remote?: boolean };
-
-					if (!commandName) {
+					if (!filePath) {
 						return {
-							content: [{ type: 'text', text: 'Error: commandName is required' }],
+							content: [{ type: 'text', text: `Error: Command '${command}' not found in context '${context}'` }],
 							isError: true,
 						};
 					}
 
-					// Check if command exists
-					const commandsDir = path.join(__dirname, '..', 'commands');
-					const filePath = path.join(commandsDir, `${commandName}.js`);
-					
-					if (!fs.existsSync(filePath)) {
-						return {
-							content: [{ type: 'text', text: `Error: Command '${commandName}' not found at ${filePath}` }],
-							isError: true,
-						};
-					}
-
-					if (remote) {
-						// Execute remotely via CDP (requires connection)
-						if (!this.cdpConnection.isConnected()) {
+					// Handle based on context
+					if (context === 'MCP') {
+						// Execute locally
+						try {
+							const result = await executeLocalCommand(filePath, commandArgs);
 							return {
-								content: [
-									{
-										type: 'text',
-										text: 'Error: Not connected to runtime. Use connect_to_runtime first, or set remote: false.',
-									},
-								],
+								content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+							};
+						} catch (e) {
+							return {
+								content: [{ type: 'text', text: `Error executing command: ${e instanceof Error ? e.message : String(e)}` }],
 								isError: true,
 							};
 						}
-
-						const code = fs.readFileSync(filePath, 'utf-8');
-						const argsCode = `var _toolArgs = ${JSON.stringify(dynamicArgs)};`;
-						const wrappedCode = argsCode + '\n' + code;
-						const result = await this.cdpConnection.evaluate(wrappedCode);
-						return {
-							content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-						};
-					} else {
+					} else if (context === 'RPC' || context === 'RUN') {
+						// For now, RPC and RUN context commands execute locally
+						// In a full implementation, these would execute remotely
 						// Execute locally using fs.readFile + new Function
 						try {
-							const result = await executeLocalCommand(commandName, dynamicArgs);
+							const result = await executeLocalCommand(filePath, commandArgs);
 							return {
 								content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
 							};
@@ -294,31 +212,108 @@ export class StrategyServer {
 					}
 				}
 
-				default: {
-					// Check if this is a dynamically loaded command
-					const commandCode = getCommandCode(name);
-					if (commandCode) {
-						if (!this.cdpConnection.isConnected()) {
-							return {
-								content: [
-									{
-										type: 'text',
-										text: 'Error: Not connected to runtime. Use connect_to_runtime first.',
-									},
-								],
-								isError: true,
-							};
+				case 'list': {
+					const { context = 'ALL' } = args as { context?: CommandContext | 'ALL' };
+
+					let commands;
+					if (context === 'ALL') {
+						commands = listCommands();
+					} else {
+						commands = listCommands(context);
+					}
+
+					// Group by context for better readability
+					const grouped = commands.reduce((acc, cmd) => {
+						if (!acc[cmd.context]) {
+							acc[cmd.context] = [];
 						}
-						// Inject arguments into the script
-						const argsCode = `var _toolArgs = ${JSON.stringify(args)};`;
-						const wrappedCode = argsCode + '\n' + commandCode;
-						const result = await this.cdpConnection.evaluate(wrappedCode);
+						acc[cmd.context].push(cmd);
+						return acc;
+					}, {} as Record<string, typeof commands>);
+
+					const summary = Object.entries(grouped).map(([ctx, cmds]) => {
+						const byFolder = cmds.reduce((acc, cmd) => {
+							const folder = cmd.folder || 'root';
+							if (!acc[folder]) acc[folder] = [];
+							acc[folder].push(cmd.name);
+							return acc;
+						}, {} as Record<string, string[]>);
+
+						let text = `\n=== ${ctx} ===\n`;
+						Object.entries(byFolder).forEach(([folder, names]) => {
+							text += `  ${folder}/: ${names.join(', ')}\n`;
+						});
+						return text;
+					}).join('\n');
+
+					return {
+						content: [
+							{ type: 'text', text: `Available commands (${commands.length} total):${summary}` },
+						],
+					};
+				}
+
+				case 'help': {
+					const { context, command } = args as { context: CommandContext; command: string };
+
+					if (!context || !command) {
 						return {
-							content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+							content: [{ type: 'text', text: 'Error: context and command are required' }],
+							isError: true,
 						};
 					}
 
-					throw new Error(`Unknown tool: ${name}`);
+					const help = getCommandHelp(context, command);
+
+					if (!help) {
+						return {
+							content: [{ type: 'text', text: `Command '${command}' not found in context '${context}'` }],
+							isError: true,
+						};
+					}
+
+					// Format help output
+					let output = `\nNAME\n    ${help.name}\n\n`;
+					output += `CONTEXT\n    ${help.context}${help.folder ? `/${help.folder}` : ''}\n\n`;
+					output += `DESCRIPTION\n    ${help.description}\n\n`;
+
+					if (help.inputSchema && help.inputSchema.properties) {
+						output += `PARAMETERS\n`;
+						const props = help.inputSchema.properties as Record<string, { type: string; description?: string; enum?: string[] }>;
+						const required = (help.inputSchema.required as string[]) || [];
+						Object.entries(props).forEach(([key, val]) => {
+							const typeStr = val.enum ? `enum(${val.enum.join('|')})` : val.type;
+							const req = required.includes(key) ? ' (required)' : '';
+							output += `    ${key}: ${typeStr}${req}\n`;
+							if (val.description) {
+								output += `        ${val.description}\n`;
+							}
+						});
+						output += '\n';
+					}
+
+					if (help.examples.length > 0) {
+						output += `EXAMPLES\n`;
+						help.examples.forEach((ex, i) => {
+							output += `    ${i + 1}. ${ex.description}\n`;
+							output += `       execute(${JSON.stringify(ex.execute)})\n\n`;
+						});
+					}
+
+					if (help.related.length > 0) {
+						output += `SEE ALSO\n    ${help.related.join(', ')}\n`;
+					}
+
+					return {
+						content: [{ type: 'text', text: output }],
+					};
+				}
+
+				default: {
+					return {
+						content: [{ type: 'text', text: `Unknown tool: ${name}. Available tools: execute, list, help` }],
+						isError: true,
+					};
 				}
 			}
 		});
@@ -328,6 +323,7 @@ export class StrategyServer {
 		const transport = new StdioServerTransport();
 		await this.server.connect(transport);
 		console.error('Mnemonica Strategy MCP server running on stdio');
-		console.error('Tools: connect_to_runtime, get_runtime_types, compare_with_tactica, etc.');
+		console.error('Tools: execute, list, help (3 bundled MCP tools)');
+		console.error('Use: list {context: "ALL"} to see all available commands');
 	}
 }
