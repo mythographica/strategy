@@ -20,13 +20,26 @@
 // Includes Swagger UI with "Try it out" functionality
 // NOTE: No outer IIFE - server wraps this code with _toolArgs
 
-try {
-	var http = process.mainModule.require('http');
-	var url = process.mainModule.require('url');
-	var fs = process.mainModule.require('fs');
-	var path = process.mainModule.require('path');
+// Get ctx from the execution context
+var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+var require = ctx.require || function(m) { return require(m); };
+var args = ctx.args || {};
 
-	var args = (typeof _toolArgs !== 'undefined') ? _toolArgs : {};
+// Parse message if it exists
+if (args.message && typeof args.message === 'string') {
+	try {
+		var parsed = JSON.parse(args.message);
+		args = parsed;
+	} catch (e) {
+		// keep original args
+	}
+}
+
+try {
+	var http = require('http');
+	var url = require('url');
+	var fs = require('fs');
+	var path = require('path');
 	var port = args.port || 8080;
 
 	// Check if server already running on different port

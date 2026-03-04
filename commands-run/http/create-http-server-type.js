@@ -15,8 +15,23 @@
 // Chrome DevTools can discover this as a "debug target"
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 
 		// Get SyncBase as parent using lookup
 		var SyncBase = mnemonica.defaultTypes.lookup('SyncBase');
@@ -34,7 +49,7 @@
 		var HTTPServerType = SyncBase.define('HTTPServer', function (data) {
 			process._rawDebug('[HTTPServer constructor] Starting HTTP server on port 9228...');
 
-			var http = process.mainModule.require('http');
+			var http = require('http');
 
 			// Create HTTP server that responds with debug info
 			var server = http.createServer(function (req, res) {

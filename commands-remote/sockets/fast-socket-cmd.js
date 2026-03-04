@@ -25,10 +25,23 @@
 // Bypasses CDP overhead for immediate execution
 
 (() => {
-	try {
-		var net = process.mainModule.require('net');
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
 
-		var args = (typeof _toolArgs !== 'undefined') ? _toolArgs : {};
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
+	try {
+		var net = require('net');
 		var command = args.command || 'ping';
 		var params = args.params || {};
 		var socketPath = '/tmp/mnemonica-fast.sock';

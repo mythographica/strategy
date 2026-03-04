@@ -33,7 +33,22 @@
 
 (() => {
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		// Get ctx from the execution context
+		var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+		var require = ctx.require || function(m) { return require(m); };
+		var args = ctx.args || {};
+
+		// Parse message if it exists
+		if (args.message && typeof args.message === 'string') {
+			try {
+				var parsed = JSON.parse(args.message);
+				args = parsed;
+			} catch (e) {
+				// keep original args
+			}
+		}
+
+		var mnemonica = require('mnemonica');
 		var defaultTypes = mnemonica.defaultTypes;
 
 		// Get or create Sentience root type
@@ -57,8 +72,7 @@
 			});
 		}
 
-		// Get arguments
-		var args = (typeof _toolArgs !== 'undefined') ? _toolArgs : {};
+		// Get arguments (already parsed at top)
 		var content = args.content || 'Empty memory';
 		var emotion = args.emotion || 'neutral';
 		var intensity = args.intensity || 0.5;

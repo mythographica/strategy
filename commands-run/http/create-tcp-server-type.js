@@ -15,8 +15,23 @@
 // Uses built-in 'net' module (no external dependencies)
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 
 		process._rawDebug('[create-tcp-server-type] Starting...');
 
@@ -34,7 +49,7 @@
 		var TCPServerType = SyncBase.define('TCPServer', function (data) {
 			process._rawDebug('[TCPServer constructor] Starting TCP server on port 9227...');
 
-			var net = process.mainModule.require('net');
+			var net = require('net');
 
 			var self = this;
 			this.connections = [];

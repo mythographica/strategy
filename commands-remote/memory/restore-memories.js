@@ -20,11 +20,26 @@
 
 (() => {
 	try {
-		var fs = process.mainModule.require('fs');
-		var path = process.mainModule.require('path');
-		var mnemonica = process.mainModule.require('mnemonica');
+		// Get ctx from the execution context
+		var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+		var require = ctx.require || function(m) { return require(m); };
+		var args = ctx.args || {};
+		var store = ctx.store;
 
-		var args = (typeof _toolArgs !== 'undefined') ? _toolArgs : {};
+		// Parse message if it exists
+		if (args.message && typeof args.message === 'string') {
+			try {
+				var parsed = JSON.parse(args.message);
+				args = parsed;
+			} catch (e) {
+				// keep original args
+			}
+		}
+
+		var fs = require('fs');
+		var path = require('path');
+		var mnemonica = require('mnemonica');
+
 		var filename = args.filename || 'ai-memories.json';
 
 		var projectPath = '/code/mnemonica/tactica-examples/nestjs';

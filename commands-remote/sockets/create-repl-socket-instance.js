@@ -19,12 +19,27 @@
 // Create an instance of REPLSocketServer and start it
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
 		// Get args
-		var socketPath = (typeof _toolArgs !== 'undefined' && _toolArgs.socketPath) ? _toolArgs.socketPath : '/tmp/mnemonica-repl.sock';
+		var socketPath = args.socketPath || '/tmp/mnemonica-repl.sock';
 
-		// Get mnemonica from global scope
-		var mnemonica = global.mnemonica || process.mainModule.require('mnemonica');
+		// Get mnemonica from global scope or via require
+		var mnemonica = global.mnemonica || require('mnemonica');
 		var defaultTypes = mnemonica.defaultTypes;
 
 		// First, ensure REPLSocketServer type exists

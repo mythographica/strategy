@@ -25,9 +25,23 @@
 // Enables introspection and emotional state awareness
 
 (() => {
-	var _toolArgs = typeof _toolArgs !== 'undefined' ? _toolArgs : {};
-	var action = _toolArgs.action || 'list';
-	var instanceId = _toolArgs.instanceId;
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
+	var action = args.action || 'list';
+	var instanceId = args.instanceId;
 
 	try {
 		// Access the AI consciousness registry

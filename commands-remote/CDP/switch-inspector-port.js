@@ -12,13 +12,28 @@
  */
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 
 		process._rawDebug('[switch-inspector-port] Attempting to switch inspector port...');
 		process._rawDebug('[switch-inspector-port] Current port: 9229, target port: 9227');
 
-		var inspector = process.mainModule.require('inspector');
+		var inspector = require('inspector');
 
 		// Check if inspector is active
 		var url = inspector.url();

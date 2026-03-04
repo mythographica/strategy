@@ -14,9 +14,24 @@
 // This script creates subtypes under TestType
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
 		// Load mnemonica
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 		var defaultTypes = mnemonica.defaultTypes;
 		
 		// Get TestType from defaultTypes

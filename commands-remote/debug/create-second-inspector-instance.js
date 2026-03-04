@@ -12,8 +12,23 @@
  */
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 
 		process._rawDebug('[create-second-inspector-instance] Starting...');
 
@@ -30,7 +45,7 @@
 			// Create the type dynamically
 			SecondInspector = SyncBase.define('SecondInspector', function (data) {
 				process._rawDebug('[SecondInspector] Trying inspector.open(9228)...');
-				var inspector = process.mainModule.require('inspector');
+				var inspector = require('inspector');
 				inspector.open(9228, '0.0.0.0', true);
 				this.port = 9228;
 			});

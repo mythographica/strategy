@@ -20,12 +20,27 @@
 // This script creates a new Mnemonica type in the running application
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
 		// Get the type name from arguments
-		var typeName = (typeof _toolArgs !== 'undefined' && _toolArgs.typeName) ? _toolArgs.typeName : 'TestType';
+		var typeName = args.typeName || 'TestType';
 
 		// Load mnemonica
-		var mnemonica = process.mainModule.require('mnemonica');
+		var mnemonica = require('mnemonica');
 
 		// Define constructor function using a named function for proper binding
 		function TestTypeConstructor (data) {

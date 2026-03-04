@@ -14,9 +14,24 @@
 // It must use ES5-compatible syntax (var instead of const/let)
 
 (() => {
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
+
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
 	try {
-		// Use process.mainModule.require to load mnemonica
-		var mnemonica = process.mainModule.require('mnemonica');
+		// Use require to load mnemonica
+		var mnemonica = require('mnemonica');
 
 		// Access defaultCollection (Map) instead of defaultTypes (Proxy)
 		var result = {};

@@ -15,14 +15,29 @@
 // Based on: /code/_dev/repl_sokets/repl_sockets.js
 
 (() => {
-	try {
-		// Use process.mainModule.require for CDP context
-		var net = process.mainModule.require('net');
-		var fs = process.mainModule.require('fs');
-		var repl = process.mainModule.require('repl');
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
 
-		// Get Mnemonica from global
-		var mnemonica = global.mnemonica || process.mainModule.require('mnemonica');
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
+	try {
+		// Use require for CDP context (now from ctx)
+		var net = require('net');
+		var fs = require('fs');
+		var repl = require('repl');
+
+		// Get Mnemonica from global or via require
+		var mnemonica = global.mnemonica || require('mnemonica');
 		var define = mnemonica.define;
 		var defaultTypes = mnemonica.defaultTypes;
 

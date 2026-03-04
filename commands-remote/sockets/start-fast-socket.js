@@ -20,11 +20,24 @@
 // Bypasses CDP overhead for much faster communication
 
 (() => {
-	try {
-		var net = process.mainModule.require('net');
-		var fs = process.mainModule.require('fs');
+	// Get ctx from the execution context
+	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+	var require = ctx.require || function(m) { return require(m); };
+	var args = ctx.args || {};
 
-		var args = (typeof _toolArgs !== 'undefined') ? _toolArgs : {};
+	// Parse message if it exists
+	if (args.message && typeof args.message === 'string') {
+		try {
+			var parsed = JSON.parse(args.message);
+			args = parsed;
+		} catch (e) {
+			// keep original args
+		}
+	}
+
+	try {
+		var net = require('net');
+		var fs = require('fs');
 		var socketPath = args.socketPath || '/tmp/mnemonica-fast.sock';
 
 		// Remove old socket if exists
@@ -48,7 +61,7 @@
 							result.data = { pong: true, timestamp: Date.now() };
 							break;
 						case 'getTypes':
-							var mnemonica = process.mainModule.require('mnemonica');
+							var mnemonica = require('mnemonica');
 							var types = [];
 							var collection = mnemonica.defaultCollection;
 							// Get all type names

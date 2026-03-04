@@ -15,7 +15,11 @@
 
 (() => {
 	try {
-		var mnemonica = process.mainModule.require('mnemonica');
+		// Get ctx from the execution context
+		var ctx = (typeof ctx !== 'undefined') ? ctx : {};
+		var require = ctx.require || function(m) { return require(m); };
+
+		var mnemonica = require('mnemonica');
 		var defaultTypes = mnemonica.defaultTypes;
 
 		// Create root consciousness type
