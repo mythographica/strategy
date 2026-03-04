@@ -213,8 +213,9 @@ export class StrategyServer {
 					// Execute command
 					try {
 						const result = await executeCommand(filePath, args);
+						const text = result !== undefined ? JSON.stringify(result, null, 2) : 'Command executed (no return value)';
 						return {
-							content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+							content: [{ type: 'text', text }],
 						};
 					} catch (e) {
 						return {
