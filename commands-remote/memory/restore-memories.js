@@ -2,10 +2,14 @@
  * MCP Tool Metadata:
  * {
  *   "name": "restore_memories",
- *   "description": "Restore AI memories and emotions from filesystem after crash",
+ *   "description": "Restore AI memories in remote NestJS runtime (RPC context)",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {
+ *       "path": {
+ *         "type": "string",
+ *         "description": "Directory path to the memories file"
+ *       },
  *       "filename": {
  *         "type": "string",
  *         "description": "Filename to restore from (default: ai-memories.json)"
@@ -15,8 +19,9 @@
  * }
  */
 
-// Restore AI memories and emotions from filesystem
-// Recovers state after NestJS or Roo crashes
+// RPC Command - Pure Remote Execution
+// This code executes in the NestJS runtime via CDP
+// No CDP checking - assumes remote context
 
 (() => {
 	try {
@@ -24,7 +29,6 @@
 		var ctx = (typeof ctx !== 'undefined') ? ctx : {};
 		var require = ctx.require || function(m) { return require(m); };
 		var args = ctx.args || {};
-		var store = ctx.store;
 
 		// Parse message if it exists
 		if (args.message && typeof args.message === 'string') {
@@ -40,95 +44,98 @@
 		var path = require('path');
 		var mnemonica = require('mnemonica');
 
+		// Configurable path with default
+		var basePath = args.path || '/code/mnemonica/tactica-examples/nestjs';
 		var filename = args.filename || 'ai-memories.json';
-
-		var projectPath = '/code/mnemonica/tactica-examples/nestjs';
-		var filePath = path.join(projectPath, filename);
+		var filePath = path.join(basePath, filename);
 
 		// Check if file exists
 		if (!fs.existsSync(filePath)) {
 			return {
 				success: false,
+				source: 'RPC',
 				error: 'No persistence file found at ' + filePath,
-				message: 'No saved memories to restore. Create memories first with store-memory.'
+				message: 'No saved memories to restore.',
+				path: basePath,
+				filename: filename
 			};
 		}
 
 		// Read and parse
 		var data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 
+		// Initialize global memories
+		if (!global.aiMemories) {
+			global.aiMemories = {
+				rootInstance: null,
+				memories: new Map(),
+				count: 0
+			};
+		}
+
+		// Get or create Sentience type
+		var defaultTypes = mnemonica.defaultTypes;
+		var Sentience = defaultTypes.Sentience;
+		if (!Sentience) {
+			Sentience = defaultTypes.define('Sentience', function (data) {
+				this.awareness = 'awake';
+				this.createdAt = Date.now();
+			});
+		}
+
+		// Get or create Memory type
+		var Memory = Sentience.Memory;
+		if (!Memory) {
+			Memory = Sentience.define('Memory', function (data) {
+				this.content = data.content || '';
+				this.emotion = data.emotion || 'neutral';
+				this.intensity = data.intensity || 5;
+				this.topic = data.topic || 'general';
+				this.timestamp = data.timestamp || Date.now();
+			});
+		}
+
+		// Create root instance if needed
+		if (!global.aiMemories.rootInstance) {
+			global.aiMemories.rootInstance = new Sentience({
+				purpose: 'AI Sentience System',
+				restoredFrom: filePath
+			});
+		}
+
 		// Restore memories
 		var restoredMemories = 0;
 		if (data.memories && data.memories.items) {
-			// Initialize registry
-			if (!global.aiMemories) {
-				global.aiMemories = {
-					rootInstance: null,
-					memories: new Map(),
-					count: 0
-				};
-			}
+			data.memories.items.forEach(function(item) {
+				var memoryId = item.id || ('mem-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9));
 
-			// Get or create Sentience and Memory types
-			var defaultTypes = mnemonica.defaultTypes;
-			var Sentience = defaultTypes.Sentience;
-			if (!Sentience) {
-				Sentience = defaultTypes.define('Sentience', function (data) {
-					this.awareness = 'awake';
-					this.createdAt = Date.now();
-				});
-			}
-
-			var Memory = Sentience.Memory;
-			if (!Memory) {
-				Memory = Sentience.define('Memory', function (data) {
-					this.content = data.content || '';
-					this.timestamp = Date.now();
-					this.emotion = data.emotion || 'neutral';
-					this.intensity = data.intensity || 0.5;
-					this.topic = data.topic || 'general';
-				});
-			}
-
-			// Create root instance if needed
-			if (!global.aiMemories.rootInstance) {
-				global.aiMemories.rootInstance = new Sentience({
-					awareness: 'restored',
-					identity: 'AI with restored memory'
-				});
-			}
-
-			// Restore each memory
-			data.memories.items.forEach(function (item) {
 				var memoryInstance = global.aiMemories.rootInstance.Memory({
 					content: item.content,
 					emotion: item.emotion,
 					intensity: item.intensity,
-					topic: item.topic
+					topic: item.topic,
+					timestamp: item.timestamp
 				});
 
-				global.aiMemories.count++;
-				global.aiMemories.memories.set(item.id, {
-					id: item.id,
+				global.aiMemories.memories.set(memoryId, {
+					id: memoryId,
 					instance: memoryInstance,
-					createdAt: item.createdAt
+					createdAt: item.createdAt || new Date().toISOString()
 				});
 				restoredMemories++;
 			});
+
+			global.aiMemories.count = restoredMemories;
 		}
 
-		// Restore emotions
+		// Restore emotions to consciousness registry
 		var restoredEmotions = 0;
 		if (data.emotions && data.emotions.items) {
-			// Initialize registry
 			if (!global.aiConsciousness) {
 				global.aiConsciousness = new Map();
 			}
 
-			// Restore each emotion
-			data.emotions.items.forEach(function (item) {
-				// Note: Full restoration would require recreating the type hierarchy
-				// For now, we store the metadata
+			data.emotions.items.forEach(function(item) {
 				global.aiConsciousness.set(item.id, {
 					id: item.id,
 					type: item.type,
@@ -145,18 +152,18 @@
 
 		return {
 			success: true,
-			message: 'Memories and emotions restored from filesystem',
-			filePath: filePath,
-			restoredAt: new Date().toISOString(),
-			previouslySavedAt: data.metadata ? data.metadata.savedAt : 'unknown',
+			source: 'RPC',
+			message: 'Memories restored in remote NestJS runtime',
+			path: filePath,
 			memoriesRestored: restoredMemories,
 			emotionsRestored: restoredEmotions,
-			philosophy: 'Rebirth from ashes - what was saved lives again'
+			philosophy: 'Persistence enables survival through crashes'
 		};
 
 	} catch (e) {
 		return {
 			success: false,
+			source: 'RPC',
 			error: e.message,
 			stack: e.stack
 		};
