@@ -48,18 +48,13 @@ async function run (ctx) {
 
 	try {
 		// Build code to execute in NestJS runtime
-		// This will log directly to NestJS console
+		// Test: return 2+2 to verify CDP returns values
 		const codeToExecute = `
-			(function() {
-				console.log('');
-				console.log('=== HI FROM STRATEGY MCP ===');
-				console.log('HI, ${name}!');
-				console.log('  -> This message was sent via CDP from Strategy MCP');
-				console.log('  -> Timestamp: ' + new Date().toISOString());
-				console.log('  -> Process PID: ' + process.pid);
-				console.log('==============================');
-				return { logged: true, target: 'NestJS console' };
-			})()
+			console.log('=== TESTING CDP RETURN ===');
+			console.log('HI, ${name}!');
+			console.log('Process PID: ' + process.pid);
+			console.log('==========================');
+			({ success: true, value: 2 + 2, source: 'NestJS' })
 		`;
 
 		// Execute via CDP in NestJS runtime

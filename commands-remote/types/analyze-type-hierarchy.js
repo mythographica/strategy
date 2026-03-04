@@ -10,158 +10,177 @@
  * }
  */
 
-// This script analyzes the complete type hierarchy from the runtime
-// It traverses both defaultCollection (root types) and .subtypes (child types)
+// Analyze the complete type hierarchy from the runtime
+// Executes in NestJS via CDP
 
-(() => {
-	// Get ctx from the execution context
-	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
-	var require = ctx.require || function(m) { return require(m); };
-	var args = ctx.args || {};
+var { require, args } = ctx;
 
-	// Parse message if it exists
-	if (args.message && typeof args.message === 'string') {
+// Parse message if it exists
+if (args.message && typeof args.message === 'string') {
+	try {
+		var parsed = JSON.parse(args.message);
+		args = parsed;
+	} catch (e) {
+		// keep original args
+	}
+}
+
+try {
+	console.log('');
+	console.log('=== NESTJS EXECUTION: analyze-type-hierarchy ===');
+	console.log('Analyzing type hierarchy in NestJS runtime via CDP');
+	console.log('Timestamp: ' + new Date().toISOString());
+	console.log('Process PID: ' + process.pid);
+	console.log('=================================================');
+
+	var mnemonica = require('mnemonica');
+	var collection = mnemonica.defaultCollection;
+
+	var result = {
+		totalTypes: 0,
+		rootTypes: [],
+		maxDepth: 0,
+		tree: {}
+	};
+
+	// Type map to store all discovered types
+	var typeMap = {};
+
+	// Helper to safely get type name from constructor
+	function getTypeName (Constructor) {
 		try {
-			var parsed = JSON.parse(args.message);
-			args = parsed;
+			var symbols = Object.getOwnPropertySymbols(Constructor);
+			for (var i = 0; i < symbols.length; i++) {
+				if (symbols[i].toString() === 'Symbol(constructor name)') {
+					return Constructor[symbols[i]];
+				}
+			}
+			return Constructor.name || 'anonymous';
 		} catch (e) {
-			// keep original args
+			return 'unknown';
 		}
 	}
 
-	try {
-		var mnemonica = require('mnemonica');
-		var collection = mnemonica.defaultCollection;
+	// Helper to get parent type name
+	function getParent (Constructor) {
+		try {
+			var proto = Object.getPrototypeOf(Constructor.prototype);
+			if (proto && proto.constructor) {
+				return getTypeName(proto.constructor);
+			}
+		} catch (e) {}
+		return null;
+	}
 
-		var result = {
-			totalTypes: 0,
-			rootTypes: [],
-			maxDepth: 0,
-			tree: {}
+	// Recursive function to discover types
+	function discoverTypes (Constructor, parentName, depth) {
+		var name = getTypeName(Constructor);
+
+		if (typeMap[name]) {
+			return; // Already discovered
+		}
+
+		result.totalTypes++;
+		if (depth > result.maxDepth) {
+			result.maxDepth = depth;
+		}
+
+		typeMap[name] = {
+			name: name,
+			parent: parentName,
+			depth: depth,
+			hasSubtypes: false,
+			subtypes: []
 		};
 
-		// Type map to store all discovered types
-		var typeMap = {};
-
-		// Helper to safely get type name from constructor
-		function getTypeName (Constructor) {
-			try {
-				var symbols = Object.getOwnPropertySymbols(Constructor);
-				for (var i = 0; i < symbols.length; i++) {
-					if (symbols[i].toString() === 'Symbol(constructor-name)') {
-						return Constructor[symbols[i]];
-					}
-				}
-				return Constructor.name || Constructor.TypeName;
-			} catch (e) {
-				return null;
-			}
-		}
-
-		// Helper to iterate subtypes using the Proxy API
-		function forEachSubtype (Constructor, callback) {
-			try {
-				Constructor.subtypes.forEach(callback);
-			} catch (e) {}
-		}
-
-		// Helper to get parent from constructor
-		function getParent (Constructor) {
-			try {
-				return Constructor.parent;
-			} catch (e) {
-				return null;
-			}
-		}
-
-		// Recursively discover all types starting from a root constructor
-		function discoverTypes (Constructor, parentName, depth) {
-			if (typeof Constructor !== 'function') {
-				return;
-			}
-
-			var name = getTypeName(Constructor);
-			if (!name || typeMap[name]) {
-				return;
-			}
-
-			// Record this type
-			typeMap[name] = {
-				name: name,
-				parent: parentName,
-				subtypes: [],
-				depth: depth
-			};
-			result.totalTypes++;
-
-			if (depth > result.maxDepth) {
-				result.maxDepth = depth;
-			}
-
-			// If it has a parent, add to parent's subtypes list
-			if (parentName && typeMap[parentName]) {
-				typeMap[parentName].subtypes.push(name);
-			}
-
-			// Recursively discover subtypes
-			forEachSubtype(Constructor, function (subConstructor) {
-				discoverTypes(subConstructor, name, depth + 1);
+		// Check for subtypes
+		var subtypes = Constructor.subtypes;
+		if (subtypes && subtypes.size > 0) {
+			typeMap[name].hasSubtypes = true;
+			subtypes.forEach(function (SubConstructor, subName) {
+				typeMap[name].subtypes.push(subName);
+				discoverTypes(SubConstructor, name, depth + 1);
 			});
 		}
 
-		// Start discovery from all root types in defaultCollection
+		// Root types have no parent
+		if (!parentName) {
+			result.rootTypes.push(name);
+		}
+	}
+
+	// Start discovery from defaultCollection
+	if (collection) {
 		collection.forEach(function (Constructor, name) {
-			if (typeof Constructor === 'function') {
-				result.rootTypes.push(name);
-				discoverTypes(Constructor, null, 0);
-			}
+			discoverTypes(Constructor, null, 0);
 		});
+	}
 
-		// Build tree structure for output
-		function buildTree (name) {
-			var type = typeMap[name];
-			if (!type) return null;
+	// Also check defaultTypes (use Object.getOwnPropertyNames to avoid proxy issues)
+	if (mnemonica.defaultTypes) {
+		var dt = mnemonica.defaultTypes;
+		try {
+			var dtKeys = Object.getOwnPropertyNames(dt);
+			dtKeys.forEach(function (key) {
+				try {
+					var val = dt[key];
+					if (typeof val === 'function' && !typeMap[key]) {
+						discoverTypes(val, null, 0);
+					}
+				} catch (e) {
+					// Skip properties that can't be accessed
+				}
+			});
+		} catch (e) {
+			// defaultTypes might be a proxy, skip if problematic
+		}
+	}
 
-			var node = {
-				name: name,
-				depth: type.depth,
-				children: []
-			};
+	// Build tree structure
+	function buildTree (name) {
+		var type = typeMap[name];
+		if (!type) return null;
 
-			for (var i = 0; i < type.subtypes.length; i++) {
-				var child = buildTree(type.subtypes[i]);
+		var node = {
+			name: name,
+			children: []
+		};
+
+		if (type.subtypes.length > 0) {
+			type.subtypes.forEach(function (subName) {
+				var child = buildTree(subName);
 				if (child) {
 					node.children.push(child);
 				}
-			}
-
-			return node;
+			});
 		}
 
-		// Build trees for each root
-		for (var i = 0; i < result.rootTypes.length; i++) {
-			var rootName = result.rootTypes[i];
-			var tree = buildTree(rootName);
-			if (tree) {
-				result.tree[rootName] = tree;
-			}
-		}
-
-		// Also create a flat list of all types with their info
-		result.allTypes = Object.keys(typeMap).map(function (name) {
-			return {
-				name: name,
-				parent: typeMap[name].parent,
-				depth: typeMap[name].depth,
-				hasChildren: typeMap[name].subtypes.length > 0
-			};
-		});
-
-		return result;
-	} catch (error) {
-		return {
-			error: error.message,
-			stack: error.stack
-		};
+		return node;
 	}
-})();
+
+	result.rootTypes.forEach(function (rootName) {
+		result.tree[rootName] = buildTree(rootName);
+	});
+
+	// Summary
+	result.summary = {
+		total: result.totalTypes,
+		roots: result.rootTypes.length,
+		maxDepth: result.maxDepth,
+		rootsList: result.rootTypes
+	};
+
+	return {
+		success: true,
+		action: 'analyze',
+		...result
+	};
+
+} catch (e) {
+	return {
+		success: false,
+		action: 'analyze',
+		error: e.message,
+		stack: e.stack
+	};
+}

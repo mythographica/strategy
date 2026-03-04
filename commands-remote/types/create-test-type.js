@@ -12,57 +12,51 @@
  *       }
  *     },
  *     "required": ["typeName"]
- *   },
- *   "excludeFromMCP": true
+ *   }
  * }
  */
 
-// This script creates a new Mnemonica type in the running application
+// Create a new Mnemonica type in the running application via CDP
 
-(() => {
-	// Get ctx from the execution context
-	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
-	var require = ctx.require || function(m) { return require(m); };
-	var args = ctx.args || {};
+var { require, args } = ctx;
 
-	// Parse message if it exists
-	if (args.message && typeof args.message === 'string') {
-		try {
-			var parsed = JSON.parse(args.message);
-			args = parsed;
-		} catch (e) {
-			// keep original args
-		}
-	}
-
+if (args.message && typeof args.message === 'string') {
 	try {
-		// Get the type name from arguments
-		var typeName = args.typeName || 'TestType';
+		args = JSON.parse(args.message);
+	} catch (e) {}
+}
 
-		// Load mnemonica
-		var mnemonica = require('mnemonica');
+try {
+	console.log('');
+	console.log('=== NESTJS EXECUTION: create-test-type ===');
+	console.log('Creating type in NestJS runtime via CDP');
+	console.log('Timestamp: ' + new Date().toISOString());
+	console.log('Process PID: ' + process.pid);
+	console.log('======================================');
 
-		// Define constructor function using a named function for proper binding
-		function TestTypeConstructor (data) {
-			this.message = (data && data.message) ? data.message : 'default message';
-			this.createdAt = Date.now();
-		}
+	var typeName = args.typeName || 'TestType';
+	var mnemonica = require('mnemonica');
 
-		// Use defaultTypes.define with the named function
-		var NewType = mnemonica.defaultTypes.define(typeName, TestTypeConstructor);
-
-		return {
-			success: true,
-			typeName: typeName,
-			message: 'Type "' + typeName + '" created successfully',
-			hasSubTypes: !!NewType.subtypes,
-			isConstructor: typeof NewType === 'function'
-		};
-	} catch (e) {
-		return {
-			success: false,
-			error: e.message,
-			stack: e.stack
-		};
+	// Define constructor function
+	function TestTypeConstructor (data) {
+		this.message = (data && data.message) ? data.message : 'default message';
+		this.createdAt = Date.now();
 	}
-})();
+
+	// Create the type
+	var NewType = mnemonica.defaultTypes.define(typeName, TestTypeConstructor);
+
+	return {
+		success: true,
+		typeName: typeName,
+		message: 'Type "' + typeName + '" created successfully',
+		hasSubTypes: !!NewType.subtypes,
+		isConstructor: typeof NewType === 'function'
+	};
+} catch (e) {
+	return {
+		success: false,
+		error: e.message,
+		stack: e.stack
+	};
+}

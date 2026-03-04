@@ -2,72 +2,68 @@
  * MCP Tool Metadata:
  * {
  *   "name": "create_test_subtype",
- *   "description": "Create subtypes under TestType in the running application",
+ *   "description": "Create a subtype of an existing Mnemonica type",
  *   "inputSchema": {
  *     "type": "object",
- *     "properties": {}
- *   },
- *   "excludeFromMCP": true
+ *     "properties": {
+ *       "parentType": {
+ *         "type": "string",
+ *         "description": "Name of the parent type"
+ *       },
+ *       "subTypeName": {
+ *         "type": "string",
+ *         "description": "Name of the new subtype"
+ *       }
+ *     },
+ *     "required": ["parentType", "subTypeName"]
+ *   }
  * }
  */
 
-// This script creates subtypes under TestType
+// Create a subtype of an existing Mnemonica type via CDP
 
-(() => {
-	// Get ctx from the execution context
-	var ctx = (typeof ctx !== 'undefined') ? ctx : {};
-	var require = ctx.require || function(m) { return require(m); };
-	var args = ctx.args || {};
+var { require, args } = ctx;
 
-	// Parse message if it exists
-	if (args.message && typeof args.message === 'string') {
-		try {
-			var parsed = JSON.parse(args.message);
-			args = parsed;
-		} catch (e) {
-			// keep original args
-		}
-	}
-
+if (args.message && typeof args.message === 'string') {
 	try {
-		// Load mnemonica
-		var mnemonica = require('mnemonica');
-		var defaultTypes = mnemonica.defaultTypes;
-		
-		// Get TestType from defaultTypes
-		var TestType = defaultTypes.TestType;
-		
-		if (!TestType) {
-			return { error: 'TestType not found. Create it first using create-test-type.' };
-		}
-		
-		// Create subtypes
-		var TestChildA = TestType.define('TestChildA', function (data) {
-			this.value = data.value || 'A';
-		});
-		
-		var TestChildB = TestType.define('TestChildB', function (data) {
-			this.value = data.value || 'B';
-		});
-		
-		// Create grandchild
-		var TestGrandChild = TestChildA.define('TestGrandChild', function (data) {
-			this.nested = data.nested || true;
-		});
-		
+		args = JSON.parse(args.message);
+	} catch (e) {}
+}
+
+try {
+	var parentTypeName = args.parentType;
+	var subTypeName = args.subTypeName;
+	var mnemonica = require('mnemonica');
+
+	// Find parent type
+	var ParentType = mnemonica.defaultTypes[parentTypeName];
+	if (!ParentType) {
 		return {
-			success: true,
-			message: 'Created subtypes: TestChildA, TestChildB, TestGrandChild (under TestChildA)',
-			parentType: 'TestType',
-			createdTypes: ['TestChildA', 'TestChildB', 'TestGrandChild'],
-			TestType_has_subtypes: !!TestType.subtypes,
-			TestChildA_has_subtypes: !!TestChildA.subtypes
-		};
-	} catch (e) {
-		return { 
-			success: false, 
-			error: e.message, 
-			stack: e.stack 
+			success: false,
+			error: 'Parent type "' + parentTypeName + '" not found'
 		};
 	}
-})()
+
+	// Define constructor for subtype
+	function SubTypeConstructor (data) {
+		this.subTypeData = data || {};
+		this.createdAt = Date.now();
+	}
+
+	// Create the subtype
+	var SubType = ParentType.define(subTypeName, SubTypeConstructor);
+
+	return {
+		success: true,
+		parentType: parentTypeName,
+		subTypeName: subTypeName,
+		message: 'Subtype "' + subTypeName + '" created under "' + parentTypeName + '"',
+		isConstructor: typeof SubType === 'function'
+	};
+} catch (e) {
+	return {
+		success: false,
+		error: e.message,
+		stack: e.stack
+	};
+}
