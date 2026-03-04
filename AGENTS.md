@@ -417,3 +417,16 @@ Use the Strategy MCP server to:
 4. **Dynamic discovery**: Commands are loaded dynamically, no restart needed
 5. **Context matters**: Choose correct folder (MCP/RPC/RUN) for execution context
 6. **Test command**: Use `commands-remote/CDP/test.js` to debug args passing
+
+
+## 3-Tier Memory Architecture
+
+**Updated**: 2026-03-04T12:32:39.557Z
+
+Successfully implemented 3-tier command architecture:
+- MCP (orchestration): Tries RPC, falls back to RUN
+- RPC (remote): Pure CDP execution in NestJS runtime
+- RUN (local): File system operations
+
+Commands: restore_memories, store_memory
+Features: Configurable paths, automatic fallback, detailed logging
