@@ -42,9 +42,10 @@ strategy/
 ├── commands-mcp/              # Local MCP execution
 │   ├── swagger/               # 6 commands (start/stop swagger-api, etc.)
 │   ├── tactica/               # 2 commands (load/compare tactica types)
+│   ├── cdp/                   # NEW: CDP-based commands (create-type, analyze-hierarchy)
 │   └── utils/                 # 1 command (get-local-cwd)
 │
-├── commands-remote/           # CDP execution in NestJS
+├── commands-remote/           # RPC execution via direct CDP
 │   ├── ai/                    # 2 commands (create-ai-consciousness, etc.)
 │   ├── CDP/                   # 6 commands (connection, restart-nestjs, etc.)
 │   ├── debug/                 # 8 commands (debug port, inspector)
@@ -52,9 +53,83 @@ strategy/
 │   ├── sockets/               # 5 commands (repl socket, fast socket)
 │   └── types/                 # 5 commands (runtime types, test types)
 │
-└── commands-run/              # VS Code HTTP context
-    └── http/                  # 6 commands (HTTP server commands)
+├── commands-run/              # VS Code HTTP context
+│   └── http/                  # 6 commands (HTTP server commands)
+│
+└── cdp-scripts/               # NEW: Scripts executed in NestJS via CDP
+    ├── create-type.js         # Creates mnemonica types in NestJS
+    └── analyze-hierarchy.js   # Retrieves complete type hierarchy
 ```
+
+## CDP Scripts Architecture (New)
+
+The `cdp-scripts/` folder contains JavaScript files that are executed **inside the target Node.js runtime** via Chrome Debug Protocol's `Runtime.evaluate()`:
+
+### How CDP Scripts Work
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   MCP Server    │────▶│  CDP Connection  │────▶│   NestJS App    │
+│  (commands-mcp) │     │ (Runtime.evaluate)│     │ (cdp-scripts/)  │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+       │                                                    │
+       │                                                    ▼
+       │                                            Console.log appears
+       │                                            in NestJS terminal!
+       │                                                    │
+       └────────────────◄───────────────────────────────────┘
+                    Return value via CDP
+```
+
+### Key Differences from RPC Commands
+
+| Aspect | RPC Commands (commands-remote/) | CDP Scripts (cdp-scripts/) |
+|--------|----------------------------------|---------------------------|
+| Execution | Direct CDP evaluate | Script file sent via CDP |
+| Module access | `var { require } = ctx` | `process.mainModule.require()` |
+| Context | Has access to ctx.store | Isolated VM context |
+| Use case | Simple operations | Complex type analysis |
+
+### Writing CDP Scripts
+
+**Required pattern for requiring modules:**
+```javascript
+// CDP scripts run in isolated VM - use process.mainModule.require
+var mnemonica = process.mainModule.require('mnemonica');
+var fs = process.mainModule.require('fs');
+```
+
+**Accessing mnemonica types (avoid proxy issues):**
+```javascript
+// Get default collection
+var defaultCollection = mnemonica.defaultTypes;
+
+// Iterate subtypes Map (avoids proxy enumeration issues)
+defaultCollection.subtypes.forEach(function (Type, name) {
+    console.log('Found type:', name);
+});
+
+// Recursive subtype traversal
+function getSubtypes (Type) {
+    var subtypes = [];
+    if (Type && Type.subtypes) {
+        Type.subtypes.forEach(function (SubType, name) {
+            subtypes.push({
+                name: name,
+                subtypes: getSubtypes(SubType)  // Recursive
+            });
+        });
+    }
+    return subtypes;
+}
+```
+
+### Current CDP Scripts
+
+| Script | Purpose | MCP Command |
+|--------|---------|-------------|
+| `create-type.js` | Creates mnemonica types in NestJS | `cdp_create_type` |
+| `analyze-hierarchy.js` | Retrieves complete type hierarchy | `cdp_analyze_type_hierarchy` |
 
 ## MCP Tools (v5 - 3 Bundled Tools)
 
@@ -207,12 +282,32 @@ return { success: true, result: "success" };
 
 ## Standard Analysis (v5)
 
-### Type Introspection
+### Type Introspection via CDP Scripts (New)
+
+```javascript
+// Create type in NestJS via CDP (uses cdp-scripts/create-type.js)
+execute {
+  context: "MCP",
+  command: "cdp_create_type",
+  message: "{ \"typeName\": \"MyType\" }"
+}
+
+// Analyze complete type hierarchy via CDP (uses cdp-scripts/analyze-hierarchy.js)
+execute {
+  context: "MCP",
+  command: "cdp_analyze_type_hierarchy",
+  message: "{}"
+}
+// Returns: { hierarchy: { UserEntity: {...}, ...}, typeCount: 4, ... }
+```
+
+### Type Introspection via RPC Commands
+
 ```javascript
 // Get all Mnemonica types from connected runtime
 execute { context: "RPC", command: "get_runtime_types", message: "{}" }
 
-// Analyze type hierarchy
+// Analyze type hierarchy (RPC version)
 execute { context: "RPC", command: "analyze_type_hierarchy", message: "{}" }
 
 // Compare with Tactica-generated types

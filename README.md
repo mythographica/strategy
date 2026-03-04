@@ -166,11 +166,18 @@ execute {
   message: "{}"
 }
 
-// Analyze type hierarchy
+// Analyze type hierarchy via CDP (retrieves complete type tree from NestJS)
 execute {
-  context: "RPC",
-  command: "analyze_type_hierarchy",
+  context: "MCP",
+  command: "cdp_analyze_type_hierarchy",
   message: "{}"
+}
+
+// Create type in NestJS via CDP
+execute {
+  context: "MCP",
+  command: "cdp_create_type",
+  message: "{ \"typeName\": \"MyType\" }"
 }
 
 // Load Tactica-generated types
@@ -263,6 +270,47 @@ npm run watch
 
 # Test
 npm run test
+```
+
+## CDP Scripts Architecture
+
+The `cdp-scripts/` folder contains scripts that execute inside the target Node.js runtime via Chrome Debug Protocol:
+
+```
+cdp-scripts/
+├── create-type.js          # Creates mnemonica types in NestJS
+└── analyze-hierarchy.js    # Retrieves complete type hierarchy
+```
+
+**How it works:**
+1. MCP command reads the script file
+2. Injects `var args = {...}` at the top with command arguments
+3. Sends to NestJS via `client.Runtime.evaluate({ expression: script })`
+4. Script executes in isolated VM context inside NestJS
+5. Console.log output appears in NestJS terminal (not MCP output)
+6. Return value is sent back to MCP
+
+**Key patterns for CDP scripts:**
+```javascript
+// Use process.mainModule.require (not require) because CDP runs in isolated VM
+var mnemonica = process.mainModule.require('mnemonica');
+
+// Access types via subtypes Map (avoids proxy enumeration issues)
+defaultCollection.subtypes.forEach(function (Type, name) {
+    // Process each type
+});
+
+// Recursive traversal for subtype hierarchy
+function getSubtypes (Type) {
+    var subtypes = [];
+    Type.subtypes.forEach(function (SubType, name) {
+        subtypes.push({
+            name: name,
+            subtypes: getSubtypes(SubType)  // Recursive
+        });
+    });
+    return subtypes;
+}
 ```
 
 ## Creating Commands
