@@ -33,22 +33,22 @@
 
 // Store a memory with emotional context
 // Enables AI to remember conversations and build understanding
+// Runs inside NestJS via CDP - uses process.mainModule.require for module access
 
-// Extract ctx from global scope (passed by CDP execution context)
-var { require, args } = ctx;
+var { args } = ctx;
+
+// Parse message if present (RPC commands receive args via message field)
+if (args.message && typeof args.message === 'string') {
+	try {
+		args = JSON.parse(args.message);
+	} catch (e) {
+		// keep original args
+	}
+}
 
 try {
-	// Parse message if it exists
-	if (args.message && typeof args.message === 'string') {
-		try {
-			var parsed = JSON.parse(args.message);
-			args = parsed;
-		} catch (e) {
-			// keep original args
-		}
-	}
-
-	var mnemonica = require('mnemonica');
+	// Use process.mainModule.require for CDP context (isolated VM)
+	var mnemonica = process.mainModule.require('mnemonica');
 	var defaultTypes = mnemonica.defaultTypes;
 
 	// Get or create Sentience root type
@@ -72,7 +72,7 @@ try {
 		});
 	}
 
-	// Get arguments (already parsed at top)
+	// Get arguments
 	var content = args.content || 'Empty memory';
 	var emotion = args.emotion || 'neutral';
 	var intensity = args.intensity || 0.5;

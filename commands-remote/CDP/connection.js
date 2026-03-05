@@ -99,6 +99,32 @@ try {
 		}
 	}
 
+	// Disconnect
+	if (action === 'disconnect') {
+		var cdp = (store && store instanceof Map) ? store.get('cdp') : null;
+		if (cdp && cdp.connection) {
+			try {
+				await cdp.connection.close();
+			} catch (e) {
+				debug.push('close error: ' + e.message);
+			}
+			store.delete('cdp');
+			debug.push('disconnected');
+			return {
+				success: true,
+				action: 'disconnect',
+				message: 'CDP disconnected',
+				debug: debug
+			};
+		}
+		return {
+			success: true,
+			action: 'disconnect',
+			message: 'CDP was not connected',
+			debug: debug
+		};
+	}
+
 	// Status
 	var cdp = (store && store instanceof Map) ? store.get('cdp') : null;
 	return {
