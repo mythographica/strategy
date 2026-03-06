@@ -42,7 +42,7 @@ interface CommandFile {
  */
 const CONTEXT_FOLDERS: Record<CommandContext, string> = {
 	MCP: 'commands-mcp',
-	RPC: 'commands-remote',
+	RPC: 'commands-rpc',
 	RUN: 'commands-run',
 };
 

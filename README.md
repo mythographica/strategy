@@ -253,7 +253,7 @@ execute {
 | Context | Folder | Execution Environment |
 |---------|--------|----------------------|
 | MCP | `commands-mcp/` | Local MCP server process |
-| RPC | `commands-remote/` | Remote via CDP in target Node.js |
+| RPC | `commands-rpc/` | Remote via CDP in target Node.js |
 | RUN | `commands-run/` | HTTP endpoint in VS Code |
 
 ## Development

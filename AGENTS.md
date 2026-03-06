@@ -10,7 +10,7 @@ Guidance for AI agents working on the Mnemonica Strategy MCP Server.
 
 The Strategy MCP server exposes only **3 bundled MCP tools** that provide access to 46+ commands organized in 3 context folders:
 
-1. **execute** - Run any command from commands-mcp/, commands-remote/, or commands-run/
+1. **execute** - Run any command from commands-mcp/, commands-rpc/, or commands-run/
 2. **list** - Discover available commands (like `ls` for commands)
 3. **help** - Get documentation for any command (like `man` in Linux)
 
@@ -45,7 +45,7 @@ strategy/
 │   ├── cdp/                   # NEW: CDP-based commands (create-type, analyze-hierarchy)
 │   └── utils/                 # 1 command (get-local-cwd)
 │
-├── commands-remote/           # RPC execution via direct CDP
+├── commands-rpc/           # RPC execution via direct CDP
 │   ├── ai/                    # 2 commands (create-ai-consciousness, etc.)
 │   ├── CDP/                   # 6 commands (connection, restart-nestjs, etc.)
 │   ├── debug/                 # 8 commands (debug port, inspector)
@@ -83,7 +83,7 @@ The `cdp-scripts/` folder contains JavaScript files that are executed **inside t
 
 ### Key Differences from RPC Commands
 
-| Aspect | RPC Commands (commands-remote/) | CDP Scripts (cdp-scripts/) |
+| Aspect | RPC Commands (commands-rpc/) | CDP Scripts (cdp-scripts/) |
 |--------|----------------------------------|---------------------------|
 | Execution | Direct CDP evaluate | Script file sent via CDP |
 | Module access | `var { require } = ctx` | `process.mainModule.require()` |
@@ -143,7 +143,7 @@ The Strategy MCP server exposes only **3 bundled tools**:
 
 ### Context Values
 - **MCP**: Local execution in MCP server process (`commands-mcp/`)
-- **RPC**: Remote execution via CDP in NestJS runtime (`commands-remote/`)
+- **RPC**: Remote execution via CDP in NestJS runtime (`commands-rpc/`)
 - **RUN**: HTTP execution in VS Code context (`commands-run/`)
 
 ### Args Passing Mechanism (IMPORTANT)
@@ -232,7 +232,7 @@ Commands are organized in 3 context folders based on execution environment:
 | Folder | Context | Execution |
 |--------|---------|-----------|
 | `commands-mcp/` | MCP | Local MCP server process |
-| `commands-remote/` | RPC | Remote via CDP in NestJS runtime |
+| `commands-rpc/` | RPC | Remote via CDP in NestJS runtime |
 | `commands-run/` | RUN | HTTP endpoint in VS Code |
 
 ### Creating New Commands
@@ -404,7 +404,7 @@ return {
 - Can spawn child processes
 - Cannot access CDP connection
 
-### RPC Context (commands-remote/)
+### RPC Context (commands-rpc/)
 - Runs in target Node.js runtime via CDP
 - Can access runtime state (variables, functions, types)
 - Uses `process.mainModule.require` for Node modules
@@ -419,7 +419,7 @@ return {
 
 **Test command created for debugging:**
 ```javascript
-// File: commands-remote/CDP/test.js
+// File: commands-rpc/CDP/test.js
 // Use this to verify args passing is working
 
 execute { 
@@ -511,7 +511,7 @@ Use the Strategy MCP server to:
 3. **Parse in commands**: Always parse `args.message` as JSON
 4. **Dynamic discovery**: Commands are loaded dynamically, no restart needed
 5. **Context matters**: Choose correct folder (MCP/RPC/RUN) for execution context
-6. **Test command**: Use `commands-remote/CDP/test.js` to debug args passing
+6. **Test command**: Use `commands-rpc/CDP/test.js` to debug args passing
 
 
 ## 3-Tier Memory Architecture
