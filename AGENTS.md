@@ -516,7 +516,7 @@ Use the Strategy MCP server to:
 
 ## 3-Tier Memory Architecture
 
-**Updated**: 2026-03-04T12:32:39.557Z
+**Updated**: 2026-03-05T08:46:44Z
 
 Successfully implemented 3-tier command architecture:
 - MCP (orchestration): Tries RPC, falls back to RUN
@@ -525,3 +525,11 @@ Successfully implemented 3-tier command architecture:
 
 Commands: restore_memories, store_memory
 Features: Configurable paths, automatic fallback, detailed logging
+
+**COMPLETED**: CDP Memory Persistence Workflow (2026-03-05)
+- Created `cdp_store_memory` - stores memories in NestJS via CDP
+- Created `fetch-memories.js` CDP script - reads NestJS runtime state
+- Fixed `persist_memories` - merges new memories with existing file (no overwrites)
+- Tested: 6 memories + 6 emotions persisted to ai-memories.json
+- Architecture: cdp_store_memory → NestJS → fetch-memories.js → persist_memories → ai-memories.json
+- Merge logic: Uses Map for deduplication, only adds new memories

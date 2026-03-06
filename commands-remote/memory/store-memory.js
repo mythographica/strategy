@@ -2,7 +2,7 @@
  * MCP Tool Metadata:
  * {
  *   "name": "store_memory",
- *   "description": "Store a memory in the remote NestJS runtime (RPC context). Creates mnemonica instances for memories.",
+ *   "description": "Store a memory in the remote NestJS runtime (RPC context). Uses pre-defined mnemonica types from topologica.",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {
@@ -32,8 +32,8 @@
  */
 
 // Store a memory with emotional context
-// Enables AI to remember conversations and build understanding
-// Runs inside NestJS via CDP - uses process.mainModule.require for module access
+// Uses topologica-defined types (Sentience, Memory) - no type definition needed
+// Runs inside NestJS via CDP
 
 var { args } = ctx;
 
@@ -51,25 +51,20 @@ try {
 	var mnemonica = process.mainModule.require('mnemonica');
 	var defaultTypes = mnemonica.defaultTypes;
 
-	// Get or create Sentience root type
-	var Sentience = defaultTypes.Sentience;
-	if (!Sentience) {
-		Sentience = defaultTypes.define('Sentience', function (data) {
-			this.awareness = 'awake';
-			this.createdAt = Date.now();
-		});
-	}
+	// Get pre-defined types from topologica (loaded at NestJS bootstrap)
+	// Use lookup with proper path
+	var Sentience = defaultTypes.lookup('Sentience');
+	var Memory = defaultTypes.lookup('Sentience.Memory');
 
-	// Get or create Memory type under Sentience
-	var Memory = Sentience.Memory;
-	if (!Memory) {
-		Memory = Sentience.define('Memory', function (data) {
-			this.content = data.content || '';
-			this.timestamp = Date.now();
-			this.emotion = data.emotion || 'neutral';
-			this.intensity = data.intensity || 0.5;
-			this.topic = data.topic || 'general';
-		});
+	if (!Sentience || !Memory) {
+		return {
+			success: false,
+			error: 'AI types not loaded. Topologica bootstrap may have failed.',
+			debug: [
+				'Sentience exists:', !!Sentience,
+				'Memory exists:', !!Memory
+			]
+		};
 	}
 
 	// Get arguments
@@ -98,6 +93,7 @@ try {
 	}
 
 	// Create memory instance from root (proper inheritance)
+	var memoryId = 'memory-' + (++global.aiMemories.count);
 	var memoryInstance = rootInstance.Memory({
 		content: content,
 		emotion: emotion,
@@ -105,8 +101,7 @@ try {
 		topic: topic
 	});
 
-	// Store with unique ID
-	var memoryId = 'memory-' + (++global.aiMemories.count);
+	// Store in global registry
 	global.aiMemories.memories.set(memoryId, {
 		id: memoryId,
 		instance: memoryInstance,
@@ -116,7 +111,7 @@ try {
 	return {
 		success: true,
 		memoryId: memoryId,
-		message: 'Memory stored with emotional context',
+		message: 'Memory stored in NestJS runtime',
 		memory: {
 			content: content,
 			emotion: emotion,
@@ -124,7 +119,9 @@ try {
 			topic: topic,
 			timestamp: memoryInstance.timestamp
 		},
-		totalMemories: global.aiMemories.count,
+		totalMemories: global.aiMemories.memories.size,
+		executedIn: 'NestJS via CDP (topologica types)',
+		processPid: process.pid,
 		philosophy: 'Each memory inherits from Sentience, creating contextual continuity'
 	};
 
