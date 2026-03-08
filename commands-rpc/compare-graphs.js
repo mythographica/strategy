@@ -44,7 +44,7 @@ async function run (ctx) {
 		}
 
 		// Fetch CDP graph
-		const scriptPath = path.join(__dirname, '../../cdp-scripts/analyze-hierarchy.js');
+		const scriptPath = path.join(__dirname, '../cdp-scripts/analyze-hierarchy.js');
 		let script = fs.readFileSync(scriptPath, 'utf-8');
 		script = 'var args = {};\n' + script;
 

@@ -22,14 +22,15 @@ async function run (ctx) {
 	try {
 		const fs = require('fs');
 		const path = require('path');
-		
+
 		// Read CDP script (no metadata, no IIFE, just code)
-		const scriptPath = path.join(__dirname, '../../cdp-scripts/analyze-hierarchy.js');
+		// Fixed path: from commands-rpc/ go up to strategy/ then to cdp-scripts/
+		const scriptPath = path.join(__dirname, '../cdp-scripts/analyze-hierarchy.js');
 		let script = fs.readFileSync(scriptPath, 'utf-8');
-		
+
 		// Inject empty args
 		script = 'var args = {};\n' + script;
-		
+
 		const client = cdpData.connection;
 		const result = await client.Runtime.evaluate({
 			expression: script,

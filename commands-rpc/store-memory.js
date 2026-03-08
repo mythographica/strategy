@@ -61,7 +61,7 @@ async function run (ctx) {
 		const path = require('path');
 
 		// Read CDP script
-		const scriptPath = path.join(__dirname, '../../cdp-scripts/store-memory.js');
+		const scriptPath = path.join(__dirname, '../cdp-scripts/store-memory.js');
 		let script = fs.readFileSync(scriptPath, 'utf-8');
 
 		// Inject args

@@ -43,7 +43,7 @@ async function run (ctx) {
 		const path = require('path');
 		
 		// Read CDP script (no metadata, no IIFE, just code)
-		const scriptPath = path.join(__dirname, '../../cdp-scripts/create-type.js');
+		const scriptPath = path.join(__dirname, '../cdp-scripts/create-type.js');
 		let script = fs.readFileSync(scriptPath, 'utf-8');
 		
 		// Inject args
