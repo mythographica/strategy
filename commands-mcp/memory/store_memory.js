@@ -112,17 +112,19 @@ function run (ctx) {
 				});
 			} else {
 				const rpcValue = rpcResult.result?.value;
-				if (rpcValue && rpcValue.success) {
+				// Handle different response structures from CDP
+				const actualResult = rpcValue?.result || rpcValue;
+				if (actualResult && actualResult.success) {
 					result.attempts.push({ tier: 'RPC', status: 'success' });
 					result.success = true;
-					result.data = rpcValue;
+					result.data = actualResult;
 					result.message = 'Memory stored via RPC (remote execution)';
 					return result;
 				} else {
-					result.attempts.push({ 
-						tier: 'RPC', 
+					result.attempts.push({
+						tier: 'RPC',
 						status: 'failed',
-						error: rpcValue?.error || 'RPC returned unsuccessful'
+						error: actualResult?.error || 'RPC returned unsuccessful'
 					});
 				}
 			}
