@@ -36,6 +36,9 @@
 	],
 	"author": "went.out@gmail.com",
 	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/mythographica/strategy.git"
