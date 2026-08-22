@@ -2,19 +2,14 @@
 
 Guidance for AI agents working on the Mnemonica Strategy MCP Server.
 
-> **Phase 1 rewrite (2026-08-22).** This file replaces the stale v5-era guide.
-> The old text described 46+ commands, folders that no longer exist, and —
-> critically — a wrong execution model. Everything below reflects the audited
-> reality. See `reports/audit-2026-08-22.md` for the evidence and
-> `reports/reframe-plan-2026-08-22.md` for where this is going.
-
 ## What this is
 
 **@mnemonica/strategy** is the live bridge between a running Mnemonica
-runtime and the tools that want to see it: AI agents via MCP, Mnemographica,
-and eventually the Queue-4 3D graph. It attaches to a target Node.js process
-via the Chrome Debug Protocol (CDP) and evaluates extraction scripts inside
-that process. Zero instrumentation of the target.
+runtime and the tools around it. Agents drive it over MCP; visualization
+tooling (Mnemographica) is planned as a monitoring client. It attaches to a
+target Node.js process via the Chrome Debug Protocol (CDP) — zero
+instrumentation of the target — then moves construction traffic onto a
+WebSocket channel injected into that process.
 
 ## The 3-tool surface (do not expand without discussion)
 
@@ -30,8 +25,6 @@ propose adding tools lightly.
 
 ## Execution model — the truth table
 
-This is the section past sessions kept getting wrong. Read it twice.
-
 | Where code runs | How |
 |---|---|
 | **Strategy MCP process** (local) | `executeCommand` in `src/server.ts` runs EVERY command file locally: `module.exports.run` files via `require()`, all others via `new Function('ctx', body)`. There is no remote eval of command files. |
@@ -41,14 +34,17 @@ Consequences:
 
 - **NEVER `ctx.require('mnemonica')` in a command file.** `ctx.require` is the
   MCP process's require; mnemonica is a peer dependency and is not installed
-  there, and even when resolvable it would touch the WRONG process. 28
-  command files died of this in the 2026-08-22 audit (see `archive/`).
+  there, and even when resolvable it would touch the WRONG process.
+- **`ctx.require` resolves relative paths from `lib/server.js`**, not from
+  the command file — require lib modules by absolute path
+  (`path.join(__dirname, '../../lib/...')`), the same idiom used for
+  `cdp-scripts/`.
 - Code meant for the target runtime belongs in `cdp-scripts/` and loads
   mnemonica there via the **canonical prelude** (below) — never a bare
   `require`, and never a bare `process.mainModule.require` without the
   fallback chain.
 
-## The canonical prelude (Phase 2, mandatory in every cdp-script)
+## The canonical prelude (mandatory in every cdp-script)
 
 Every script evaluated in a target runtime loads the TARGET's mnemonica
 exactly this way:
@@ -72,27 +68,26 @@ Why three tiers:
 1. **CJS entries** have `process.mainModule` — the classic path.
 2. **ESM entries** don't, and `Runtime.evaluate` gets **no dynamic-import
    callback** from Node, so `import()` throws
-   `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` in inspector-evaluated code
-   (verified live 2026-08-22 against an ESM fixture). Node ≥ 20.18 / 22.3
-   offers `process.getBuiltinModule('node:module')` → `createRequire`,
-   which needs no callback.
+   `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` in inspector-evaluated code.
+   Node ≥ 20.18 / 22.3 offers `process.getBuiltinModule('node:module')` →
+   `createRequire`, which needs no callback.
 3. Older runtimes fall back to dynamic `import()`.
 
 Rules: copy the prelude verbatim (the scripts must stay self-contained
 strings); any script using it must be wrapped in an **async** IIFE so the
 tier-3 `await` is legal; `Runtime.evaluate` callers must keep
-`awaitPromise: true`. Both surviving cdp-scripts and
-`src/extract-types.js` use it; `npm run build` copies extract-types into
-`lib/` automatically.
+`awaitPromise: true`. Both cdp-scripts and `src/extract-types.js` use it;
+`npm run build` copies extract-types into `lib/` automatically.
 
 **Variant — require factory.** A script that needs more than mnemonica
 (e.g. `cdp-scripts/ws-server.js` also needs `node:http`/`node:crypto`) MAY
 generalize the same three tiers into a `targetRequire` factory and load
 everything through it, mnemonica included. The tiers and their order are
 unchanged; only the shape differs. Never a bare `require` in any case.
-- RPC-context commands are hybrid by design: orchestration locally
-  (`ctx.store.get('cdp')` for the connection), effect remotely
-  (`client.Runtime.evaluate(...)`).
+
+RPC-context commands are hybrid by design: orchestration locally
+(`ctx.store.get('cdp')` for the connection), effect remotely
+(`client.Runtime.evaluate(...)`).
 
 ## Command rules (codified, enforced by test)
 
@@ -103,25 +98,19 @@ unchanged; only the shape differs. Never a bare `require` in any case.
    - `mcp_` — runs locally, no CDP needed (tactica comparison, local utils)
    - `rpc_` — orchestrates a CDP connection, effects the target runtime
    - `run_` — local side effects (files, servers)
-   - `ws_` — the Phase 3 construction channel: `ws_bootstrap` (RPC context)
-     injects the WS server via CDP once; all other `ws_*` commands run
-     locally against `store['ws']` and speak the WS protocol
-3. **No duplicated logic across invocation styles.** The old direct-name
-   tools and `tool + script name` doublets are gone; the archive keeps the
-   record.
-4. **The `commands-rpc/sockets/` seeds are archived** at
-   `archive/commands-rpc/sockets/` — superseded by the `ws_` layer. They
-   remain useful reference material (REPL heritage from
-   `/code/_dev/repl_sokets`), not working commands.
-5. **`archive/` is frozen history.** Never load, import, or "fix" files
-   there; the loader only reads `commands-mcp/`, `commands-rpc/`,
-   `commands-run/`. Prune targets go to `archive/` (Viktor's standing
-   decision; deletion happens only on his explicit word).
-6. **`test/phase1-smoke.test.ts` pins the command tree.** Adding, removing,
+   - `ws_` — the construction channel: `ws_bootstrap` (RPC context) injects
+     the WS server via CDP once; all other `ws_*` commands run locally
+     against `store['ws']` and speak the WS protocol
+3. **No duplicated logic across invocation styles.**
+4. **`archive/` is frozen.** Never load, import, or "fix" files there; the
+   loader only reads `commands-mcp/`, `commands-rpc/`, `commands-run/`.
+   Prune targets go to `archive/`; deletion happens only on Viktor's
+   explicit word.
+5. **`test/phase1-smoke.test.ts` pins the command tree.** Adding, removing,
    or renaming a command means updating `EXPECTED` there — the suite fails
    otherwise. That failure is the review gate working as intended.
 
-## Current command tree (post-Phase-1)
+## Command tree
 
 ```
 commands-mcp/                     context: MCP (local)
@@ -147,13 +136,12 @@ commands-run/                     context: RUN (local side effects)
   utils/update_agents_md.js              run_update_agents_md
 
 cdp-scripts/                      payloads for Runtime.evaluate (NOT commands)
-  analyze-hierarchy.js                   verified live 2026-08-22
+  analyze-hierarchy.js
   create-type.js
-  ws-server.js                           Phase 3: in-target WS construction server,
-                                         verified live 2026-08-22 (17/17 direct + 9/9 MCP)
+  ws-server.js                        in-target WS construction server
 ```
 
-## The WS construction channel (Phase 3)
+## The WS construction channel
 
 Purpose: **runtime construction during active development**, not
 observability. The full loop: main server never stops → infer-debug spawns
@@ -178,16 +166,16 @@ request/response. On connect the server sends a `welcome` frame (protocol
 version, pid, mnemonica version, root type names). Ops: `ping`, `define`,
 `swap`, `instantiate`, `eval`, `list`.
 
-**Born-shimmed swap semantics (the design center, Viktor 2026-08-22).**
-Every type defined over WS is born shimmed: mnemonica keeps a stable shell
-constructor whose `impl` lives in the in-target server's closure, and the
-session registry (`Map`, full path → `setImpl`) can reassign `impl` later.
-No core change — `runSetup` reads `type.constructHandler` per construction,
-so the swap takes effect on the next `new`. `swap` REFUSES any type not born
-in this session: no re-definition of pre-existing types, ever (`define()`
-itself throws `ALREADY_DECLARED`).
+**Born-shimmed swap semantics.** Every type defined over WS is born shimmed:
+mnemonica keeps a stable shell constructor whose `impl` lives in the
+in-target server's closure, and the session registry (`Map`, full path →
+`setImpl`) can reassign `impl` later. No core change — `runSetup` reads
+`type.constructHandler` per construction, so the swap takes effect on the
+next `new`. `swap` REFUSES any type not born in this session: no
+re-definition of pre-existing types, ever (`define()` itself throws
+`ALREADY_DECLARED`).
 
-**mnemonica semantics the channel honors (learned live):**
+**mnemonica semantics the channel honors:**
 
 - Subtypes construct from parent INSTANCES: `instantiate` on a nested path
   walks the chain (`new parentInstance.SubType(...)`), taking intermediate
@@ -204,7 +192,6 @@ production runtime.
 
 ## Strategy's own architecture is mnemonica
 
-Per the reframe constraint "Strategy should itself be built on mnemonica",
 `src/strategy-types.ts` defines the server state as mnemonica types:
 
 ```
@@ -219,8 +206,8 @@ StrategyRuntime          root; one instance in the global store (StoreMeta)
 - `executeCommand` builds ctx as `new runtime.CommandContext(...)`; a
   plain-object fallback keeps pre-server usage working.
 - `rpc_connection` stores `new runtime.StrategyConnection(host, port)` as
-  `store['cdp']` — the shape (`{ connection, isConnected, host, port }`) is
-  unchanged, so existing commands read it identically.
+  `store['cdp']` — the shape (`{ connection, isConnected, host, port }`), so
+  commands read it uniformly.
 - Command files are plain JS; they only destructure props off these
   instances, which works through mnemonica's proxy layer.
 
@@ -234,12 +221,12 @@ tool, not a sandbox. Do not accept command files from untrusted sources.
 
 ```bash
 npm run build    # tsc → lib/
-npm test         # jest — 16 tests (6 legacy + 10 Phase 1/3 smoke); must stay green
+npm test         # jest — must stay green
 ```
 
 Gates for any change: build clean, tests green, and for spine commands a
 live smoke against a real runtime (the tactica-nestjs fixture + infer-debug
-harness is the standard target; see `reports/audit-2026-08-22.md`).
+harness is the standard target).
 
 ## Dependency policy
 
@@ -247,13 +234,14 @@ Real pinned ranges, no `^0.x` placeholders. `mnemonica` is a peer
 (`^1.2.7`) and a devDependency (for build/tests). Note the peer is about
 API compatibility of the extraction scripts, not about sharing a process —
 the target's mnemonica copy is always the one that matters at runtime.
-`ws` is a runtime dependency (Phase 3): the strategy-side WS client only;
-the in-target server is dependency-free by design, so targets never need
+`ws` is a runtime dependency: the strategy-side WS client only; the
+in-target server is dependency-free by design, so targets never need
 anything installed for the channel to come up.
 
-## History
+## Reports and memory hygiene
 
-`DOCUMENTATION_INCONSISTENCIES.md` (2026-03) and `archive/` (2026-08) are
-the record of how this got cleaned up. `commands-remote` was a symlink to
-`commands-rpc` and was removed in Phase 1 — if old docs mention it, they
-are stale.
+`reports/` files are the memory that survives context compaction — keep
+them while they describe current or open state, delete them once fulfilled
+or superseded (fix links that referenced them). This file must never carry
+changelog or dated history — update sections in place, describe only the
+present.
