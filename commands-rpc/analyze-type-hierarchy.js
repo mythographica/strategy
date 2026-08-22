@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "cdp_analyze_type_hierarchy",
+ *   "name": "rpc_analyze_type_hierarchy",
  *   "description": "Analyze Mnemonica type hierarchy in NestJS via CDP",
  *   "inputSchema": {
  *     "type": "object",

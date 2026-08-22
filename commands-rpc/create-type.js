@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "cdp_create_type",
+ *   "name": "rpc_create_type",
  *   "description": "Create a Mnemonica type in NestJS via CDP",
  *   "inputSchema": {
  *     "type": "object",

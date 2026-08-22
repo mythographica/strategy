@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "test",
+ *   "name": "rpc_test",
  *   "description": "Test command to verify args passing - returns third argument back",
  *   "inputSchema": {
  *     "type": "object",

@@ -24,20 +24,19 @@
 	"author": "went.out@gmail.com",
 	"license": "MIT",
 	"peerDependencies": {
-		"mnemonica": "^0.x"
+		"mnemonica": "^1.2.7"
 	},
 	"devDependencies": {
-		"@modelcontextprotocol/sdk": "^0.x",
-		"@types/chrome-remote-interface": "^0.33.0",
-		"@types/jest": "^29.x",
-		"@types/node": "^20.x",
-		"chrome-remote-interface": "^0.33.x",
-		"jest": "^29.x",
-		"ts-jest": "^29.x",
-		"typescript": "^5.x"
+		"@types/chrome-remote-interface": "^0.34.0",
+		"@types/jest": "^29.5.14",
+		"@types/node": "^25.3.0",
+		"jest": "^29.7.0",
+		"mnemonica": "1.2.7",
+		"ts-jest": "^29.4.12",
+		"typescript": "^5.9.3"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^0.x",
-		"chrome-remote-interface": "^0.33.x"
+		"@modelcontextprotocol/sdk": "^1.30.0",
+		"chrome-remote-interface": "^0.34.0"
 	}
 }

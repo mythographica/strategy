@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "say_hi_nestjs",
+ *   "name": "rpc_say_hi",
  *   "description": "Say Hi to NestJS server via CDP - executes console.log in NestJS runtime",
  *   "inputSchema": {
  *     "type": "object",

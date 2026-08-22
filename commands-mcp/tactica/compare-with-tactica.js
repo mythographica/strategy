@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "compare_with_tactica",
+ *   "name": "mcp_compare_with_tactica",
  *   "description": "Compare runtime Mnemonica types with Tactica-generated static types",
  *   "inputSchema": {
  *     "type": "object",

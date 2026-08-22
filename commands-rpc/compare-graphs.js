@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "cdp_compare_graphs",
+ *   "name": "rpc_compare_graphs",
  *   "description": "Compare CDP-retrieved type hierarchy with API-based graph from NestJS",
  *   "inputSchema": {
  *     "type": "object",

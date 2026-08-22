@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "update_agents_md",
+ *   "name": "run_update_agents_md",
  *   "description": "Update AGENTS.md file with new content (RUN context - no confirmation needed)",
  *   "inputSchema": {
  *     "type": "object",

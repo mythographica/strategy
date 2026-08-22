@@ -9,6 +9,7 @@ import {
 	ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadCommands, listCommands, getCommandHelp, getCommandPath, isLocalCommand, type CommandContext } from './command-loader';
+import { StrategyRuntime, type StrategyRuntimeInstance } from './strategy-types';
 
 /**
  * Symbol for store metadata
@@ -40,14 +41,17 @@ async function executeCommand (
 	// Read the code first to check pattern
 	const code = fs.readFileSync(filePath, 'utf-8');
 
-	// Build context - passed to command
+	// Build context - passed to command.
+	// When the server's runtime node exists, ctx is a real mnemonica
+	// CommandContext instance; the plain-object fallback keeps executeCommand
+	// usable before any StrategyServer was constructed.
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const g = global as Record<string, any>;
-	const ctx: any = {
-		require,
-		store: g.StrategyMCP,
-		args,
-	} as unknown;
+	const store = g.StrategyMCP as Map<string | symbol, unknown> | undefined;
+	const runtime = store?.get(StoreMeta) as StrategyRuntimeInstance | undefined;
+	const ctx = (runtime && store)
+		? new runtime.CommandContext(require, store, args, runtime)
+		: { require, store, args, runtime };
 
 	// If it has module.exports with run function, use require
 	if (isLocalCommand(code)) {
@@ -95,12 +99,12 @@ export class StrategyServer {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		const g = global as unknown as Record<string, unknown>;
 		if (!g.StrategyMCP) {
-			const store = new Map<string | symbol, unknown>();
-			store.set(StoreMeta, {
-				initialized: Date.now(),
-				version: '1.0'
-			});
-			g.StrategyMCP = store;
+			g.StrategyMCP = new Map<string | symbol, unknown>();
+		}
+		const store = g.StrategyMCP as Map<string | symbol, unknown>;
+		if (!store.has(StoreMeta)) {
+			const runtime = new StrategyRuntime('1.0');
+			store.set(StoreMeta, runtime);
 		}
 
 		this.server = new Server(
@@ -187,7 +191,6 @@ export class StrategyServer {
 
 			switch (name) {
 				case 'execute': {
-					console.error('[SERVER DEBUG] request.params:', JSON.stringify(request.params));
 					const { context, command } = args as {
 						context: CommandContext;
 						command: string;

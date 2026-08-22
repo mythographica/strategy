@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "get_local_cwd",
+ *   "name": "mcp_get_local_cwd",
  *   "description": "Get the current working directory from the MCP server process (local execution)",
  *   "inputSchema": {
  *     "type": "object",

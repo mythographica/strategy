@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "load_remote_tactica_types",
+ *   "name": "mcp_load_remote_tactica_types",
  *   "description": "Load Tactica-generated types from the remote runtime filesystem (reads .tactica/types.ts)",
  *   "inputSchema": {
  *     "type": "object",

@@ -1,7 +1,7 @@
 /**
  * MCP Tool Metadata:
  * {
- *   "name": "connection",
+ *   "name": "rpc_connection",
  *   "description": "Manage CDP connection to Node.js runtime (connect, disconnect, status)",
  *   "inputSchema": {
  *     "type": "object",
@@ -74,12 +74,24 @@ try {
 			debug.push('CONNECTED!');
 
 			if (store && store instanceof Map) {
-				store.set('cdp', {
-					connection: client,
-					isConnected: true,
-					host: host,
-					port: port
-				});
+				// Prefer a real mnemonica StrategyConnection node from the
+				// runtime tree; plain-object fallback keeps the command
+				// working when no StrategyServer constructed the runtime.
+				var runtime = ctx.runtime;
+				var cdpNode;
+				if (runtime && typeof runtime.StrategyConnection === 'function') {
+					cdpNode = new runtime.StrategyConnection(host, port);
+					cdpNode.connection = client;
+					cdpNode.isConnected = true;
+				} else {
+					cdpNode = {
+						connection: client,
+						isConnected: true,
+						host: host,
+						port: port
+					};
+				}
+				store.set('cdp', cdpNode);
 			}
 
 			return {

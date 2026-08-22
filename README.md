@@ -2,14 +2,21 @@
 
 MCP (Model Context Protocol) server for Mnemonica runtime analysis via Chrome Debug Protocol.
 
+> **Status: pre-release.** This package is **not published on npm** yet.
+> `npm install @mnemonica/strategy` and `npx @mnemonica/strategy` will NOT
+> work. Build from source as shown below.
+
 ## Overview
 
 Strategy connects to running Node.js applications via Chrome Debug Protocol to extract and analyze Mnemonica type hierarchies. It compares runtime types with Tactica-generated types to validate and improve static analysis.
 
-## Installation
+## Installation (from source)
 
 ```bash
-npm install @mnemonica/strategy
+git clone https://github.com/mythographica/strategy.git
+cd strategy
+npm install
+npm run build
 ```
 
 ## Usage
@@ -26,22 +33,27 @@ nest start --debug --watch
 node --inspect=9229 your-app.js
 ```
 
+Don't want `--inspect` on the main process? [infer-debug](https://github.com/wentout/infer-debug)
+can spawn a debug-enabled child copy of the app on demand and tunnel CDP
+through the app's own HTTP port — strategy attaches to that child the same
+way.
+
 ### As MCP Server
 
 ```bash
-npx @mnemonica/strategy
+node /path/to/strategy/lib/cli.js
 ```
 
-### Configure with Roo Code
+### MCP Configuration
 
-Add to `.roo/mcp.json`:
+Add to your agent framework's MCP config:
 
 ```json
 {
 	"mcpServers": {
 		"mnemonica-strategy": {
 			"command": "node",
-			"args": ["/code/mnemonica/strategy/lib/cli.js"]
+			"args": ["/path/to/strategy/lib/cli.js"]
 		}
 	}
 }
@@ -61,24 +73,24 @@ Execute any command from the 3 context folders (MCP, RPC, RUN).
 
 **Example:**
 ```javascript
-// Connect to NestJS debugger
+// Connect to Node.js debugger
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
 }
 
 // Check connection status
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"status\" }"
 }
 
-// Get runtime types
+// Analyze the runtime type hierarchy
 execute {
   context: "RPC",
-  command: "get_runtime_types",
+  command: "rpc_analyze_type_hierarchy",
   message: "{}"
 }
 ```
@@ -103,7 +115,7 @@ Get detailed help for any command.
 
 **Example:**
 ```javascript
-help { context: "RPC", command: "connection" }
+help { context: "RPC", command: "rpc_connection" }
 ```
 
 ## Args Passing Mechanism (IMPORTANT)
@@ -114,7 +126,7 @@ Due to MCP protocol limitations, command arguments must be passed as a **JSON st
 ```javascript
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
 }
 ```
@@ -124,7 +136,7 @@ execute {
 // DON'T DO THIS
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   args: { action: "connect" }  // This won't work!
 }
 ```
@@ -137,21 +149,21 @@ execute {
 // Connect to Node.js debugger
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"connect\", \"host\": \"localhost\", \"port\": 9229 }"
 }
 
 // Check connection status
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"status\" }"
 }
 
 // Disconnect from runtime
 execute {
   context: "RPC",
-  command: "connection",
+  command: "rpc_connection",
   message: "{ \"action\": \"disconnect\" }"
 }
 ```
@@ -159,73 +171,50 @@ execute {
 ### Type Analysis
 
 ```javascript
-// Get runtime types from connected application
+// Analyze the complete type hierarchy (recursive subtype tree from the target)
 execute {
   context: "RPC",
-  command: "get_runtime_types",
+  command: "rpc_analyze_type_hierarchy",
   message: "{}"
 }
 
-// Analyze type hierarchy via CDP (retrieves complete type tree from NestJS)
+// Create type in the target runtime via CDP
 execute {
-  context: "MCP",
-  command: "cdp_analyze_type_hierarchy",
-  message: "{}"
-}
-
-// Create type in NestJS via CDP
-execute {
-  context: "MCP",
-  command: "cdp_create_type",
+  context: "RPC",
+  command: "rpc_create_type",
   message: "{ \"typeName\": \"MyType\" }"
 }
 
 // Load Tactica-generated types
 execute {
   context: "MCP",
-  command: "load_remote_tactica_types",
+  command: "mcp_load_remote_tactica_types",
   message: "{ \"projectPath\": \"/path/to/project\" }"
 }
 
 // Compare runtime vs Tactica types
 execute {
   context: "MCP",
-  command: "compare_with_tactica",
+  command: "mcp_compare_with_tactica",
   message: "{ \"projectPath\": \"/path/to/project\" }"
-}
-```
-
-### Memory Management
-
-```javascript
-// Store memory in connected runtime
-execute {
-  context: "RPC",
-  command: "store_memory",
-  message: "{ \"key\": \"myKey\", \"data\": { ... } }"
-}
-
-// Recall memories
-execute {
-  context: "RPC",
-  command: "recall_memories",
-  message: "{ \"key\": \"myKey\" }"
 }
 ```
 
 ## Example Workflow
 
-1. Start your application with debug mode:
+1. Start your Mnemonica application with debug mode:
    ```bash
-   cd tactica-examples/nestjs
-   npm run start:debug
+   # any Mnemonica app, e.g. a NestJS service
+   nest start --debug --watch
+   # or plain Node.js
+   node --inspect=9229 your-app.js
    ```
 
 2. Connect to the debugger:
    ```javascript
    execute {
      context: "RPC",
-     command: "connection",
+     command: "rpc_connection",
      message: "{ \"action\": \"connect\" }"
    }
    ```
@@ -234,7 +223,7 @@ execute {
    ```javascript
    execute {
      context: "RPC",
-     command: "get_runtime_types",
+     command: "rpc_analyze_type_hierarchy",
      message: "{}"
    }
    ```
@@ -243,7 +232,7 @@ execute {
    ```javascript
    execute {
      context: "MCP",
-     command: "compare_with_tactica",
+     command: "mcp_compare_with_tactica",
      message: "{ \"projectPath\": \"/path/to/project\" }"
    }
    ```
@@ -253,8 +242,11 @@ execute {
 | Context | Folder | Execution Environment |
 |---------|--------|----------------------|
 | MCP | `commands-mcp/` | Local MCP server process |
-| RPC | `commands-rpc/` | Remote via CDP in target Node.js |
-| RUN | `commands-run/` | HTTP endpoint in VS Code |
+| RPC | `commands-rpc/` | Local orchestration; effects in the target via CDP |
+| RUN | `commands-run/` | Local side effects (files, utilities) |
+
+Command names carry their context as a prefix (`mcp_`, `rpc_`, `run_`), so
+the site of execution is visible in the name itself.
 
 ## Development
 
