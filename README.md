@@ -5,10 +5,6 @@ Mnemonica runtime** — inspect its type tree, define new types, construct
 instances, and swap constructor handlers in flight — without stopping the
 server you are developing.
 
-> **Status: pre-release.** This package is **not published on npm** yet.
-> `npm install @mnemonica/strategy` and `npx @mnemonica/strategy` will NOT
-> work. Build from source as shown below.
-
 ## Overview
 
 Strategy is the live bridge between a running Mnemonica runtime and the
@@ -38,7 +34,13 @@ The development loop this enables — the main server **never stops**:
 Strategy can also compare the runtime type tree against Tactica-generated
 types to validate static analysis — its original purpose, still available.
 
-## Installation (from source)
+## Installation
+
+```bash
+npm install @mnemonica/strategy
+```
+
+From source instead:
 
 ```bash
 git clone https://github.com/mythographica/strategy.git
@@ -69,12 +71,29 @@ way.
 ### As MCP Server
 
 ```bash
+# installed from npm
+npx @mnemonica/strategy
+
+# from a source checkout
 node /path/to/strategy/lib/cli.js
 ```
 
 ### MCP Configuration
 
 Add to your agent framework's MCP config:
+
+```json
+{
+	"mcpServers": {
+		"mnemonica-strategy": {
+			"command": "npx",
+			"args": ["-y", "@mnemonica/strategy"]
+		}
+	}
+}
+```
+
+or, from a source checkout:
 
 ```json
 {

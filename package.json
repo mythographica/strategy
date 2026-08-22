@@ -1,7 +1,7 @@
 {
 	"name": "@mnemonica/strategy",
 	"version": "0.1.0",
-	"description": "MCP server for Mnemonica runtime analysis via Chrome Debug Protocol",
+	"description": "MCP server that lets AI agents inspect, define, and hot-swap Mnemonica types inside a running Node.js process — CDP bootstrap, then a WebSocket construction channel",
 	"main": "lib/index.js",
 	"types": "lib/index.d.ts",
 	"bin": {
@@ -28,17 +28,32 @@
 		"ai",
 		"inheritance",
 		"typescript",
-		"debug-protocol"
+		"debug-protocol",
+		"chrome-devtools-protocol",
+		"live-debugging",
+		"hot-swap",
+		"websocket"
 	],
 	"author": "went.out@gmail.com",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mythographica/strategy.git"
+	},
+	"bugs": {
+		"url": "https://github.com/mythographica/strategy/issues"
+	},
+	"homepage": "https://github.com/mythographica/strategy#readme",
+	"engines": {
+		"node": ">=20"
+	},
 	"peerDependencies": {
 		"mnemonica": "^1.2.7"
 	},
 	"devDependencies": {
 		"@types/chrome-remote-interface": "^0.34.0",
 		"@types/jest": "^29.5.14",
-		"@types/node": "^25.3.0",
+		"@types/node": "^25.9.5",
 		"@types/ws": "^8.18.1",
 		"jest": "^29.7.0",
 		"mnemonica": "1.2.7",
