@@ -44,8 +44,52 @@ Consequences:
   there, and even when resolvable it would touch the WRONG process. 28
   command files died of this in the 2026-08-22 audit (see `archive/`).
 - Code meant for the target runtime belongs in `cdp-scripts/` and loads
-  modules there via `process.mainModule.require('mnemonica')` (CJS targets;
-  the ESM-safe prelude is Phase 2).
+  mnemonica there via the **canonical prelude** (below) — never a bare
+  `require`, and never a bare `process.mainModule.require` without the
+  fallback chain.
+
+## The canonical prelude (Phase 2, mandatory in every cdp-script)
+
+Every script evaluated in a target runtime loads the TARGET's mnemonica
+exactly this way:
+
+```javascript
+var mnemonica;
+if (process.mainModule && process.mainModule.require) {
+	mnemonica = process.mainModule.require('mnemonica');
+} else if (typeof process.getBuiltinModule === 'function') {
+	var nodeModule = process.getBuiltinModule('node:module');
+	var cwdRequire = nodeModule.createRequire(process.cwd() + '/__strategy_cwd__.js');
+	mnemonica = cwdRequire('mnemonica');
+} else {
+	var mnemonicaNs = await import('mnemonica');
+	mnemonica = mnemonicaNs.default || mnemonicaNs;
+}
+```
+
+Why three tiers:
+
+1. **CJS entries** have `process.mainModule` — the classic path.
+2. **ESM entries** don't, and `Runtime.evaluate` gets **no dynamic-import
+   callback** from Node, so `import()` throws
+   `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` in inspector-evaluated code
+   (verified live 2026-08-22 against an ESM fixture). Node ≥ 20.18 / 22.3
+   offers `process.getBuiltinModule('node:module')` → `createRequire`,
+   which needs no callback.
+3. Older runtimes fall back to dynamic `import()`.
+
+Rules: copy the prelude verbatim (the scripts must stay self-contained
+strings); any script using it must be wrapped in an **async** IIFE so the
+tier-3 `await` is legal; `Runtime.evaluate` callers must keep
+`awaitPromise: true`. Both surviving cdp-scripts and
+`src/extract-types.js` use it; `npm run build` copies extract-types into
+`lib/` automatically.
+
+**Variant — require factory.** A script that needs more than mnemonica
+(e.g. `cdp-scripts/ws-server.js` also needs `node:http`/`node:crypto`) MAY
+generalize the same three tiers into a `targetRequire` factory and load
+everything through it, mnemonica included. The tiers and their order are
+unchanged; only the shape differs. Never a bare `require` in any case.
 - RPC-context commands are hybrid by design: orchestration locally
   (`ctx.store.get('cdp')` for the connection), effect remotely
   (`client.Runtime.evaluate(...)`).
@@ -59,14 +103,16 @@ Consequences:
    - `mcp_` — runs locally, no CDP needed (tactica comparison, local utils)
    - `rpc_` — orchestrates a CDP connection, effects the target runtime
    - `run_` — local side effects (files, servers)
-   - `ws_` — RESERVED for the Phase 3 WS-RPC layer; do not use yet
+   - `ws_` — the Phase 3 construction channel: `ws_bootstrap` (RPC context)
+     injects the WS server via CDP once; all other `ws_*` commands run
+     locally against `store['ws']` and speak the WS protocol
 3. **No duplicated logic across invocation styles.** The old direct-name
    tools and `tool + script name` doublets are gone; the archive keeps the
    record.
-4. **`commands-rpc/sockets/` is an experimental seed for Phase 3.** Its 5
-   commands keep their legacy names and are exempt from the prefix rule
-   until the WS protocol lands. Treat them as reference material, not as
-   working commands.
+4. **The `commands-rpc/sockets/` seeds are archived** at
+   `archive/commands-rpc/sockets/` — superseded by the `ws_` layer. They
+   remain useful reference material (REPL heritage from
+   `/code/_dev/repl_sokets`), not working commands.
 5. **`archive/` is frozen history.** Never load, import, or "fix" files
    there; the loader only reads `commands-mcp/`, `commands-rpc/`,
    `commands-run/`. Prune targets go to `archive/` (Viktor's standing
@@ -82,6 +128,11 @@ commands-mcp/                     context: MCP (local)
   tactica/compare-with-tactica.js        mcp_compare_with_tactica
   tactica/load-remote-tactica-types.js   mcp_load_remote_tactica_types
   utils/get-local-cwd.js                 mcp_get_local_cwd
+  ws/define.js                           ws_define       → store['ws']
+  ws/swap.js                             ws_swap         → store['ws']
+  ws/instantiate.js                      ws_instantiate  → store['ws']
+  ws/eval.js                             ws_eval         → store['ws']
+  ws/session.js                          ws_session      → store['ws']
 
 commands-rpc/                     context: RPC (orchestrate CDP here)
   CDP/connection.js                      rpc_connection   (canonical; stores the cdp node)
@@ -90,7 +141,7 @@ commands-rpc/                     context: RPC (orchestrate CDP here)
   compare-graphs.js                      rpc_compare_graphs          → cdp-scripts/analyze-hierarchy.js + fixture /graph/json
   create-type.js                         rpc_create_type             → cdp-scripts/create-type.js
   say-hi-nestjs.js                       rpc_say_hi
-  sockets/                               5 experimental seeds (Phase 3)
+  ws/bootstrap.js                        ws_bootstrap    → cdp-scripts/ws-server.js + lib/ws-session.js
 
 commands-run/                     context: RUN (local side effects)
   utils/update_agents_md.js              run_update_agents_md
@@ -98,7 +149,58 @@ commands-run/                     context: RUN (local side effects)
 cdp-scripts/                      payloads for Runtime.evaluate (NOT commands)
   analyze-hierarchy.js                   verified live 2026-08-22
   create-type.js
+  ws-server.js                           Phase 3: in-target WS construction server,
+                                         verified live 2026-08-22 (17/17 direct + 9/9 MCP)
 ```
+
+## The WS construction channel (Phase 3)
+
+Purpose: **runtime construction during active development**, not
+observability. The full loop: main server never stops → infer-debug spawns
+the sandbox child → CDP bootstraps the WS channel once → define/swap/
+instantiate iterate over WS → tactica crystallizes the proven shape into
+`.tactica` → the main server is re-framed in flight.
+
+**Handshake.** `ws_bootstrap` (RPC context) reads `cdp-scripts/ws-server.js`
+and evaluates it over CDP. The injected script starts a dependency-free
+WebSocket server (RFC 6455 subset: `node:http` upgrade + `node:crypto` SHA1 +
+a frame codec; nothing is installed into the target) bound to `127.0.0.1` on
+an ephemeral port, mints a random token, and returns `{ port, token, pid }`.
+That CDP result is the only time the token crosses a wire; WS clients present
+it as `?token=` in the upgrade request or get a 401. Re-bootstrap is
+idempotent (returns the running channel). Strategy's client is
+`src/ws-session.ts` (`WSSession`, built on the `ws` package); the channel
+handle lives in `store['ws']` as a mnemonica `WSChannel` node.
+
+**Protocol.** One JSON message per WS frame: `{ id, op, params }` →
+`{ id, ok, result | error: { message, stack } }`. `id` correlates
+request/response. On connect the server sends a `welcome` frame (protocol
+version, pid, mnemonica version, root type names). Ops: `ping`, `define`,
+`swap`, `instantiate`, `eval`, `list`.
+
+**Born-shimmed swap semantics (the design center, Viktor 2026-08-22).**
+Every type defined over WS is born shimmed: mnemonica keeps a stable shell
+constructor whose `impl` lives in the in-target server's closure, and the
+session registry (`Map`, full path → `setImpl`) can reassign `impl` later.
+No core change — `runSetup` reads `type.constructHandler` per construction,
+so the swap takes effect on the next `new`. `swap` REFUSES any type not born
+in this session: no re-definition of pre-existing types, ever (`define()`
+itself throws `ALREADY_DECLARED`).
+
+**mnemonica semantics the channel honors (learned live):**
+
+- Subtypes construct from parent INSTANCES: `instantiate` on a nested path
+  walks the chain (`new parentInstance.SubType(...)`), taking intermediate
+  args from `chainArgs[prefixPath]`. A bare `new LookupResult()` trips
+  `WRONG_MODIFICATION_PATTERN`.
+- Async construct handlers MUST `return this` (`InstanceCreator.ts` enforces
+  it with "seems async X has no return statement").
+- Instance summaries walk the chain via `utils.parent` and merge own props
+  leaf-first — own props of the leaf alone miss everything the parents built.
+
+**Security posture.** Loopback bind + handshake token, development-only.
+This is a construction instrument for dev machines — never expose it on a
+production runtime.
 
 ## Strategy's own architecture is mnemonica
 
@@ -108,7 +210,8 @@ Per the reframe constraint "Strategy should itself be built on mnemonica",
 ```
 StrategyRuntime          root; one instance in the global store (StoreMeta)
 ├── CommandContext       built per execute() call; handed to commands as ctx
-└── StrategyConnection   one per attached CDP target; stored as store['cdp']
+├── StrategyConnection   one per attached CDP target; stored as store['cdp']
+└── WSChannel            one per bootstrapped WS channel; stored as store['ws']
 ```
 
 - `StrategyServer` constructs the root and puts it in the global
@@ -131,7 +234,7 @@ tool, not a sandbox. Do not accept command files from untrusted sources.
 
 ```bash
 npm run build    # tsc → lib/
-npm test         # jest — 14 tests (6 legacy + 8 Phase 1 smoke); must stay green
+npm test         # jest — 16 tests (6 legacy + 10 Phase 1/3 smoke); must stay green
 ```
 
 Gates for any change: build clean, tests green, and for spine commands a
@@ -144,6 +247,9 @@ Real pinned ranges, no `^0.x` placeholders. `mnemonica` is a peer
 (`^1.2.7`) and a devDependency (for build/tests). Note the peer is about
 API compatibility of the extraction scripts, not about sharing a process —
 the target's mnemonica copy is always the one that matters at runtime.
+`ws` is a runtime dependency (Phase 3): the strategy-side WS client only;
+the in-target server is dependency-free by design, so targets never need
+anything installed for the channel to come up.
 
 ## History
 

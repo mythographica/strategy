@@ -13,7 +13,8 @@ import type { TypeConstructor } from 'mnemonica';
  *
  *   StrategyRuntime
  *   ├── CommandContext     — one per execute() call, handed to commands as `ctx`
- *   └── StrategyConnection — one per attached CDP target, stored as store['cdp']
+ *   ├── StrategyConnection — one per attached CDP target, stored as store['cdp']
+ *   └── WSChannel          — one per bootstrapped WS channel, stored as store['ws']
  *
  * Command files are plain JS evaluated via `new Function('ctx', ...)`; they
  * only ever destructure props off these instances, which works identically
@@ -25,6 +26,7 @@ export interface StrategyRuntimeInstance {
 	version            : string;
 	CommandContext     : TypeConstructor<CommandContextInstance>;
 	StrategyConnection : TypeConstructor<StrategyConnectionInstance>;
+	WSChannel          : TypeConstructor<WSChannelInstance>;
 }
 
 export interface CommandContextInstance {
@@ -40,6 +42,14 @@ export interface StrategyConnectionInstance {
 	isConnected : boolean;
 	connectedAt : number;
 	connection  : unknown;
+}
+
+export interface WSChannelInstance {
+	port        : number;
+	pid         : number;
+	token       : string;
+	connectedAt : number;
+	session     : unknown;
 }
 
 export const StrategyRuntime = define('StrategyRuntime', function (this: StrategyRuntimeInstance, version: string) {
@@ -70,4 +80,18 @@ export const StrategyConnection = StrategyRuntime.define('StrategyConnection', f
 	this.isConnected = false;
 	this.connectedAt = Date.now();
 	this.connection = null;
+});
+
+export const WSChannel = StrategyRuntime.define('WSChannel', function (
+	this: WSChannelInstance,
+	port: number,
+	pid: number,
+	token: string,
+	session: unknown
+) {
+	this.port = port;
+	this.pid = pid;
+	this.token = token;
+	this.connectedAt = Date.now();
+	this.session = session;
 });

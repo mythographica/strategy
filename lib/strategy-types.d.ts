@@ -9,7 +9,8 @@ import type { TypeConstructor } from 'mnemonica';
  *
  *   StrategyRuntime
  *   ├── CommandContext     — one per execute() call, handed to commands as `ctx`
- *   └── StrategyConnection — one per attached CDP target, stored as store['cdp']
+ *   ├── StrategyConnection — one per attached CDP target, stored as store['cdp']
+ *   └── WSChannel          — one per bootstrapped WS channel, stored as store['ws']
  *
  * Command files are plain JS evaluated via `new Function('ctx', ...)`; they
  * only ever destructure props off these instances, which works identically
@@ -20,6 +21,7 @@ export interface StrategyRuntimeInstance {
     version: string;
     CommandContext: TypeConstructor<CommandContextInstance>;
     StrategyConnection: TypeConstructor<StrategyConnectionInstance>;
+    WSChannel: TypeConstructor<WSChannelInstance>;
 }
 export interface CommandContextInstance {
     require: NodeJS.Require;
@@ -34,7 +36,15 @@ export interface StrategyConnectionInstance {
     connectedAt: number;
     connection: unknown;
 }
+export interface WSChannelInstance {
+    port: number;
+    pid: number;
+    token: string;
+    connectedAt: number;
+    session: unknown;
+}
 export declare const StrategyRuntime: import("mnemonica").IDefinitorInstance<StrategyRuntimeInstance, import("mnemonica").InstanceResult<StrategyRuntimeInstance>, import("mnemonica/build/types").GlobalRegistry, "">;
 export declare const CommandContext: import("mnemonica").IDefinitorInstance<CommandContextInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, import("mnemonica").InstanceResult<CommandContextInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>>, import("mnemonica").TypeRegistry & Record<string, import("mnemonica").TypeConstructorBase> & Record<"CommandContext", import("mnemonica/build/types").StoredConstructor<CommandContextInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, "CommandContext">>, "CommandContext">;
 export declare const StrategyConnection: import("mnemonica").IDefinitorInstance<StrategyConnectionInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, import("mnemonica").InstanceResult<StrategyConnectionInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>>, import("mnemonica").TypeRegistry & Record<string, import("mnemonica").TypeConstructorBase> & Record<"StrategyConnection", import("mnemonica/build/types").StoredConstructor<StrategyConnectionInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, "StrategyConnection">>, "StrategyConnection">;
+export declare const WSChannel: import("mnemonica").IDefinitorInstance<WSChannelInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, import("mnemonica").InstanceResult<WSChannelInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>>, import("mnemonica").TypeRegistry & Record<string, import("mnemonica").TypeConstructorBase> & Record<"WSChannel", import("mnemonica/build/types").StoredConstructor<WSChannelInstance & Pick<StrategyRuntimeInstance, keyof StrategyRuntimeInstance>, "WSChannel">>, "WSChannel">;
 //# sourceMappingURL=strategy-types.d.ts.map

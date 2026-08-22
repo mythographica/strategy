@@ -17,6 +17,11 @@ const EXPECTED: Record<string, string[]> = {
 		'mcp_compare_with_tactica',
 		'mcp_get_local_cwd',
 		'mcp_load_remote_tactica_types',
+		'ws_define',
+		'ws_eval',
+		'ws_instantiate',
+		'ws_session',
+		'ws_swap',
 	],
 	RPC: [
 		'rpc_analyze_type_hierarchy',
@@ -25,12 +30,7 @@ const EXPECTED: Record<string, string[]> = {
 		'rpc_create_type',
 		'rpc_say_hi',
 		'rpc_test',
-		// sockets/ seeds kept for Phase 3, exempt from prefix rule until then
-		'connect_repl_socket',
-		'create_repl_socket_instance',
-		'create_repl_socket_type',
-		'fast_socket_cmd',
-		'start_fast_socket',
+		'ws_bootstrap',
 	],
 	RUN: [
 		'run_update_agents_md',
@@ -60,6 +60,18 @@ describe('Phase 1 command tree', () => {
 		expect(prefixed.length).toBe(10);
 	});
 
+	test('ws_ channel commands are exactly the Phase 3 set', () => {
+		const wsCommands = listCommands().filter(cmd => /^ws_/.test(cmd.name));
+		expect(wsCommands.map(cmd => cmd.name).sort()).toEqual([
+			'ws_bootstrap',
+			'ws_define',
+			'ws_eval',
+			'ws_instantiate',
+			'ws_session',
+			'ws_swap',
+		]);
+	});
+
 	test('help resolves for every command', () => {
 		for (const cmd of listCommands()) {
 			const help = getCommandHelp(cmd.context, cmd.name);
@@ -76,6 +88,7 @@ describe('mnemonica architecture', () => {
 		expect(runtime.initialized).toBeLessThanOrEqual(Date.now());
 		expect(typeof runtime.CommandContext).toBe('function');
 		expect(typeof runtime.StrategyConnection).toBe('function');
+		expect(typeof runtime.WSChannel).toBe('function');
 	});
 
 	test('CommandContext carries require/store/args through the proxy layer', () => {
@@ -98,6 +111,16 @@ describe('mnemonica architecture', () => {
 		conn.connection = { fake: 'client' };
 		expect(conn.isConnected).toBe(true);
 		expect(conn.connection).toEqual({ fake: 'client' });
+	});
+
+	test('WSChannel node matches the store shape ws commands expect', () => {
+		const runtime = new StrategyRuntime('1.0');
+		const channel = new runtime.WSChannel(4371, 1234, 'tok', { fake: 'session' });
+		expect(channel.port).toBe(4371);
+		expect(channel.pid).toBe(1234);
+		expect(channel.token).toBe('tok');
+		expect(channel.session).toEqual({ fake: 'session' });
+		expect(channel.connectedAt).toBeLessThanOrEqual(Date.now());
 	});
 });
 
