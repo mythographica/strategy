@@ -2,7 +2,7 @@
  * MCP Tool Metadata:
  * {
  *   "name": "rpc_connection",
- *   "description": "Manage CDP connection to Node.js runtime (connect, disconnect, status)",
+ *   "description": "Manage CDP connections to Node.js runtimes (connect, disconnect, status). Multiple named slots are supported: the default slot is 'cdp', any other slot name stores an additional parallel connection (e.g. a fixture child on 9229 and a VS Code extension host on 9233 at the same time).",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {
@@ -18,6 +18,10 @@
  *       "port": {
  *         "type": "number",
  *         "description": "Port to connect to (default: 9229)"
+ *       },
+ *       "slot": {
+ *         "type": "string",
+ *         "description": "Named connection slot (default: the main 'cdp' slot). Use e.g. 'ext' for the VS Code extension host or 'test' for an --inspect-brk test process."
  *       }
  *     }
  *   },
@@ -27,14 +31,18 @@
  *       "args": { "action": "connect" }
  *     },
  *     {
- *       "description": "Check connection status",
+ *       "description": "Connect to the VS Code extension host in a named slot",
+ *       "args": { "action": "connect", "port": 9233, "slot": "ext" }
+ *     },
+ *     {
+ *       "description": "Check connection status (all slots)",
  *       "args": { "action": "status" }
  *     }
  *   ]
  * }
  */
 
-// VERSION 3 - FINAL
+// VERSION 3 - FINAL (+ named slots)
 var debug = [];
 
 try {
@@ -42,11 +50,11 @@ try {
 	debug.push('ctx.args type: ' + typeof args);
 	debug.push('ctx.args keys: ' + (args ? Object.keys(args).join(',') : 'null'));
 	debug.push('ctx.args: ' + JSON.stringify(args));
-	
+
 	if (!args) {
 		return { success: false, error: 'args is null/undefined', debug: debug };
 	}
-	
+
 	// Parse message if it exists (args come via message field as JSON string)
 	var commandArgs = args;
 	if (args.message && typeof args.message === 'string') {
@@ -57,9 +65,13 @@ try {
 			debug.push('failed to parse message: ' + e.message);
 		}
 	}
-	
+
 	var action = commandArgs.action || args.action || 'status';
-	debug.push('action: ' + action);
+	var slot = commandArgs.slot || args.slot || '';
+	// The default slot keeps the bare 'cdp' key — every existing command
+	// reads store.get('cdp') and must not notice slots exist.
+	var storeKey = slot ? ('cdp:' + slot) : 'cdp';
+	debug.push('action: ' + action + ' | slot: ' + (slot || '(default)'));
 
 	if (action === 'connect') {
 		var host = commandArgs.host || args.host || 'localhost';
@@ -69,7 +81,7 @@ try {
 		try {
 			var CDP = require('chrome-remote-interface');
 			debug.push('module loaded');
-			
+
 			var client = await CDP({ host: host, port: port });
 			debug.push('CONNECTED!');
 
@@ -91,13 +103,15 @@ try {
 						port: port
 					};
 				}
-				store.set('cdp', cdpNode);
+				cdpNode.slot = slot || 'cdp';
+				store.set(storeKey, cdpNode);
 			}
 
 			return {
 				success: true,
 				action: 'connect',
-				message: 'CDP connected to ' + host + ':' + port,
+				slot: slot || 'cdp',
+				message: 'CDP connected to ' + host + ':' + port + ' (slot: ' + (slot || 'cdp') + ')',
 				debug: debug
 			};
 		} catch (err) {
@@ -105,6 +119,7 @@ try {
 			return {
 				success: false,
 				action: 'connect',
+				slot: slot || 'cdp',
 				error: err.message,
 				debug: debug
 			};
@@ -113,37 +128,53 @@ try {
 
 	// Disconnect
 	if (action === 'disconnect') {
-		var cdp = (store && store instanceof Map) ? store.get('cdp') : null;
+		var cdp = (store && store instanceof Map) ? store.get(storeKey) : null;
 		if (cdp && cdp.connection) {
 			try {
 				await cdp.connection.close();
 			} catch (e) {
 				debug.push('close error: ' + e.message);
 			}
-			store.delete('cdp');
+			store.delete(storeKey);
 			debug.push('disconnected');
 			return {
 				success: true,
 				action: 'disconnect',
-				message: 'CDP disconnected',
+				slot: slot || 'cdp',
+				message: 'CDP disconnected (slot: ' + (slot || 'cdp') + ')',
 				debug: debug
 			};
 		}
 		return {
 			success: true,
 			action: 'disconnect',
-			message: 'CDP was not connected',
+			slot: slot || 'cdp',
+			message: 'CDP was not connected (slot: ' + (slot || 'cdp') + ')',
 			debug: debug
 		};
 	}
 
-	// Status
-	var cdp = (store && store instanceof Map) ? store.get('cdp') : null;
+	// Status: the requested slot, plus the list of every connected slot
+	var cdpStatus = (store && store instanceof Map) ? store.get(storeKey) : null;
+	var slots = [];
+	if (store && store instanceof Map) {
+		store.forEach(function (value, key) {
+			if (typeof key === 'string' && key.indexOf('cdp') === 0 && value && value.isConnected) {
+				slots.push({
+					slot : value.slot || key,
+					host : value.host,
+					port : value.port
+				});
+			}
+		});
+	}
 	return {
 		success: true,
 		action: 'status',
-		connected: cdp ? cdp.isConnected : false,
-		message: (cdp && cdp.isConnected) ? 'CDP connected' : 'CDP not connected',
+		slot: slot || 'cdp',
+		connected: cdpStatus ? cdpStatus.isConnected : false,
+		slots: slots,
+		message: (cdpStatus && cdpStatus.isConnected) ? 'CDP connected' : 'CDP not connected',
 		debug: debug
 	};
 } catch (outerErr) {

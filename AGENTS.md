@@ -124,11 +124,13 @@ commands-mcp/                     context: MCP (local)
   ws/session.js                          ws_session      → store['ws']
 
 commands-rpc/                     context: RPC (orchestrate CDP here)
-  CDP/connection.js                      rpc_connection   (canonical; stores the cdp node)
+  CDP/connection.js                      rpc_connection   (canonical; stores the cdp node; named slots → store['cdp:<slot>'])
   CDP/test.js                            rpc_test         (arg-echo smoke command)
   analyze-type-hierarchy.js              rpc_analyze_type_hierarchy  → cdp-scripts/analyze-hierarchy.js
   compare-graphs.js                      rpc_compare_graphs          → cdp-scripts/analyze-hierarchy.js + fixture /graph/json
   create-type.js                         rpc_create_type             → cdp-scripts/create-type.js
+  dive-trace.js                          rpc_dive_trace              → cdp-scripts/dive-trace.js
+  eval.js                                rpc_eval                    generic Runtime.evaluate against any slot
   say-hi-nestjs.js                       rpc_say_hi
   ws/bootstrap.js                        ws_bootstrap    → cdp-scripts/ws-server.js + lib/ws-session.js
 
@@ -138,6 +140,7 @@ commands-run/                     context: RUN (local side effects)
 cdp-scripts/                      payloads for Runtime.evaluate (NOT commands)
   analyze-hierarchy.js
   create-type.js
+  dive-trace.js                       JSON-safe dump of the target's dive trace
   ws-server.js                        in-target WS construction server
 ```
 

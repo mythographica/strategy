@@ -28,8 +28,11 @@ const EXPECTED: Record<string, string[]> = {
 		'rpc_compare_graphs',
 		'rpc_connection',
 		'rpc_create_type',
+		'rpc_dive_trace',
+		'rpc_eval',
 		'rpc_say_hi',
 		'rpc_test',
+		'rpc_trace_stream',
 		'ws_bootstrap',
 	],
 	RUN: [
@@ -57,7 +60,7 @@ describe('Phase 1 command tree', () => {
 
 	test('active command names carry their site prefix', () => {
 		const prefixed = listCommands().filter(cmd => /^(mcp|rpc|run)_/.test(cmd.name));
-		expect(prefixed.length).toBe(10);
+		expect(prefixed.length).toBe(13);
 	});
 
 	test('ws_ channel commands are exactly the Phase 3 set', () => {
