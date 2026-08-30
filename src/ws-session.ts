@@ -18,6 +18,12 @@ interface PendingRequest {
 	timer: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * Handler for unsolicited server frames — currently the trace push
+ * channel's `{ op: 'trace', params: { edges } }` (traceSubscribe).
+ */
+type NotificationHandler = (params: unknown) => void;
+
 export interface WelcomeMessage {
 	op: 'welcome';
 	protocol: number;
@@ -32,6 +38,7 @@ export class WSSession {
 	private socket: WebSocket;
 	private nextId = 1;
 	private pending = new Map<number, PendingRequest>();
+	private notifications = new Map<string, NotificationHandler>();
 	private closed = false;
 
 	/**
@@ -69,6 +76,19 @@ export class WSSession {
 	get isOpen (): boolean {
 		const open = !this.closed && this.socket.readyState === WebSocket.OPEN;
 		return open;
+	}
+
+	/**
+	 * Subscribe to an unsolicited server frame by its `op` (e.g. 'trace').
+	 * Pass null to detach. Notifications carry no `id` — they never
+	 * interfere with the request/response correlation.
+	 */
+	setNotificationHandler (op: string, handler: NotificationHandler | null): void {
+		if (handler) {
+			this.notifications.set(op, handler);
+		} else {
+			this.notifications.delete(op);
+		}
 	}
 
 	async request (
@@ -112,6 +132,7 @@ export class WSSession {
 			result?: unknown;
 			error?: { message?: string; stack?: string | null };
 			op?: string;
+			params?: unknown;
 		};
 		try {
 			msg = JSON.parse(String(data)) as typeof msg;
@@ -125,6 +146,14 @@ export class WSSession {
 		}
 
 		if (typeof msg.id !== 'number') {
+			// Unsolicited server frame (notification) — e.g. the trace push
+			// channel's { op: 'trace', params: { edges } }.
+			if (msg.op) {
+				const handler = this.notifications.get(msg.op);
+				if (handler) {
+					handler(msg.params);
+				}
+			}
 			return;
 		}
 		const entry = this.pending.get(msg.id);

@@ -231,6 +231,26 @@ Gates for any change: build clean, tests green, and for spine commands a
 live smoke against a real runtime (the tactica-nestjs fixture + infer-debug
 harness is the standard target).
 
+## tools/ — agent CDP drivers (canonical, NOT published)
+
+Reusable harnesses for driving a VS Code extension-dev instance and the
+trace channel over CDP/WS (moved out of /tmp 2026-08-30; /tmp copies are
+disposable):
+
+- `vsc-driver.js` — `ext '<expr>'` / `ui '<expr>'` / `shot file.png`
+  against an instance launched with `--inspect-extensions=9233
+  --remote-debugging-port=9223`
+- `wv-eval.js` — eval inside the graph webview (reaches
+  `__mnemographica3D` through the shim iframe)
+- `hold-trace-stream.js` — connect CDP :9229 and hold rpc_trace_stream
+  open (for watching the panel while edges flow)
+- `trace-state-probe.js` — mnemographica `state/query` trace readback
+
+The user-facing live demo (target + VS Code + stream) is
+`mnemographica/scripts/live-demo.sh`. Traps (dconf holding devtools
+ports, stale xvfb screenshots, recordCreation arg order) are documented
+in `core/reports/session-state-2026-08-28.md`.
+
 ## Dependency policy
 
 Real pinned ranges, no `^0.x` placeholders. `mnemonica` is a peer

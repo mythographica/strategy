@@ -10,11 +10,17 @@
 // Auth: the session token must be presented as ?token=... during the WS
 // handshake; it crosses the wire exactly once, as this script's CDP result.
 //
-// Ops: ping | define | swap | instantiate | eval | list
+// Ops: ping | define | swap | instantiate | eval | list | traceSubscribe | traceUnsubscribe
 // Types defined here are BORN SHIMMED: mnemonica keeps a stable shell
 // constructor whose `impl` lives in this script's closure; `swap` reassigns
 // `impl`. Only session-born types are swappable — no re-definition of
 // pre-existing types, ever.
+//
+// traceSubscribe turns the channel into a PUSH trace source: the script
+// registers dive edge-lifecycle hooks (enter, and create where the target's
+// dive supports it) and every subscribed socket receives unsolicited
+// { op: 'trace', params: { edges } } frames, flushed on a short timer.
+// Edges are mapped JSON-safe exactly like cdp-scripts/dive-trace.js.
 
 (async () => {
 	try {
@@ -422,7 +428,171 @@
 			};
 		}
 
-		async function dispatch (msg) {
+		// --- Trace push subscription (B2) -----------------------------------
+		// dive PUBLISHES edge lifecycle events; this bridges them onto the WS
+		// channel as unsolicited notifications, so trace acquisition no longer
+		// polls over CDP. Construction edges ride the opt-in 'create' event
+		// (@mnemonica/dive >= 0.8.0); on older dive the channel still pushes
+		// invocation edges via 'enter' and reports create as unsupported.
+		var traceSubscribers = new Set();
+		var traceBuffer = [];
+		var TRACE_BUFFER_CAP = 5000;
+		var traceFlushTimer = null;
+		var traceHookDetach = [];
+		var traceEventsActive = [];
+		var diveTried = false;
+		var diveModule = null;
+
+		function loadDive () {
+			if (!diveTried) {
+				diveTried = true;
+				try {
+					diveModule = targetRequire('@mnemonica/dive');
+				} catch (e) {
+					diveModule = null;
+				}
+			}
+			return diveModule;
+		}
+
+		var propsReaderTried = false;
+		var propsReader = null;
+
+		// Same instanceType resolution as cdp-scripts/dive-trace.js: the
+		// edge's live instance cannot cross the wire, its mnemonica TypeName
+		// is what the panel matches bulbs by.
+		function instanceTypeOf (instance) {
+			if (!propsReaderTried) {
+				propsReaderTried = true;
+				try {
+					var mnemonicaModule = targetRequire('mnemonica/module');
+					propsReader = mnemonicaModule.getProps || null;
+				} catch (e) {
+					propsReader = null;
+				}
+			}
+			if (!instance || !propsReader) {
+				return null;
+			}
+			try {
+				var props = propsReader(instance);
+				var type = props && props.__type__;
+				return (type && type.TypeName) || null;
+			} catch (e) {
+				return null;
+			}
+		}
+
+		function mapTraceEdge (edge) {
+			return {
+				id: edge.id,
+				parentId: edge.parentId,
+				name: edge.name,
+				kind: edge.kind,
+				status: edge.status,
+				duration: (edge.duration === undefined) ? null : edge.duration,
+				ts: edge.ts,
+				instanceType: instanceTypeOf(edge.instance),
+			};
+		}
+
+		function flushTrace () {
+			if (traceBuffer.length === 0) {
+				return;
+			}
+			var batch = traceBuffer;
+			traceBuffer = [];
+			var notification = { op: 'trace', params: { edges: batch } };
+			traceSubscribers.forEach(function (send) {
+				send(notification);
+			});
+		}
+
+		function stopTraceHooks () {
+			if (traceFlushTimer) {
+				clearInterval(traceFlushTimer);
+				traceFlushTimer = null;
+			}
+			traceHookDetach.forEach(function (detach) {
+				try {
+					detach();
+				} catch (e) {}
+			});
+			traceHookDetach = [];
+			traceEventsActive = [];
+			traceBuffer = [];
+		}
+
+		// A closed socket silently unsubscribes; the last one out tears the
+		// hooks down so an unsubscribed channel costs the target nothing.
+		function dropTraceSubscriber (send) {
+			traceSubscribers.delete(send);
+			if (traceSubscribers.size === 0) {
+				stopTraceHooks();
+			}
+		}
+
+		function opTraceSubscribe (params, send) {
+			var dive = loadDive();
+			if (!dive || typeof dive.registerHook !== 'function') {
+				throw new Error('traceSubscribe: target runtime has no @mnemonica/dive registerHook — needs @mnemonica/dive >= 0.5.0');
+			}
+			if (traceSubscribers.has(send)) {
+				return { subscribed: true, already: true, events: traceEventsActive.slice() };
+			}
+
+			var wanted = (params && Array.isArray(params.events) && params.events.length > 0)
+				? params.events
+				: ['enter', 'create'];
+			var unsupported = [];
+
+			if (traceHookDetach.length === 0) {
+				// First subscriber: attach the dive hooks. 'create' is probed —
+				// a dive without it throws on registration, which we contain and
+				// report instead of failing the subscription.
+				wanted.forEach(function (event) {
+					try {
+						var detach = dive.registerHook(event, function (payload) {
+							if (!payload || !payload.edge) {
+								return;
+							}
+							if (traceBuffer.length >= TRACE_BUFFER_CAP) {
+								traceBuffer.shift();
+							}
+							traceBuffer.push(mapTraceEdge(payload.edge));
+						});
+						traceHookDetach.push(detach);
+						traceEventsActive.push(event);
+					} catch (e) {
+						unsupported.push(event);
+					}
+				});
+				if (traceHookDetach.length === 0) {
+					throw new Error('traceSubscribe: no requested events supported by the target dive (wanted: ' + wanted.join(', ') + ')');
+				}
+				var flushMs = (params && typeof params.flushMs === 'number' && params.flushMs >= 20)
+					? params.flushMs
+					: 150;
+				traceFlushTimer = setInterval(flushTrace, flushMs);
+			}
+
+			traceSubscribers.add(send);
+			var result = {
+				subscribed: true,
+				events: traceEventsActive.slice(),
+			};
+			if (unsupported.length > 0) {
+				result.unsupported = unsupported;
+			}
+			return result;
+		}
+
+		function opTraceUnsubscribe (send) {
+			dropTraceSubscriber(send);
+			return { subscribed: false };
+		}
+
+		async function dispatch (msg, send) {
 			var params = msg.params || {};
 			switch (msg.op) {
 			case 'ping':
@@ -437,6 +607,10 @@
 				return await opEval(params);
 			case 'list':
 				return opList();
+			case 'traceSubscribe':
+				return opTraceSubscribe(params, send);
+			case 'traceUnsubscribe':
+				return opTraceUnsubscribe(send);
 			default:
 				throw new Error('unknown op: "' + msg.op + '"');
 			}
@@ -466,7 +640,7 @@
 						send({ id: null, ok: false, error: { message: 'bad JSON message' } });
 						return;
 					}
-					dispatch(msg).then(function (result) {
+					dispatch(msg, send).then(function (result) {
 						send({ id: msg.id, ok: true, result: result });
 					}, function (err) {
 						send({
@@ -494,6 +668,9 @@
 			socket.on('data', onData);
 			// Client errors must never take the target down
 			socket.on('error', function () {});
+			socket.on('close', function () {
+				dropTraceSubscriber(send);
+			});
 		}
 
 		var server = http.createServer();
@@ -542,7 +719,7 @@
 			token: token,
 			pid: process.pid,
 			protocol: 1,
-			ops: ['ping', 'define', 'swap', 'instantiate', 'eval', 'list'],
+			ops: ['ping', 'define', 'swap', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
 		};
 	} catch (e) {
 		return { success: false, error: e.message, stack: e.stack };
