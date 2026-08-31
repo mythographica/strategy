@@ -1,10 +1,11 @@
 const { createRequire } = require('node:module');
 const req = createRequire('/code/mnemonica/strategy/lib/server.js');
 const CDP = req('chrome-remote-interface');
+const WV_PORT = Number(process.env.VSC_DRIVER_UI_PORT) || 9223;
 (async () => {
-	const targets = await CDP.List({ port: 9223 });
+	const targets = await CDP.List({ port: WV_PORT });
 	const iframe = targets.find(t => t.type === 'iframe' && /vscode-webview/.test(t.url || ''));
-	const client = await CDP({ port: 9223, target: iframe.id });
+	const client = await CDP({ port: WV_PORT, target: iframe.id });
 	await client.Runtime.enable();
 	const result = await client.Runtime.evaluate({ expression: process.argv[2], awaitPromise: true, returnByValue: true });
 	if (result.exceptionDetails) { console.error('EXC:', result.exceptionDetails.text, result.exceptionDetails.exception?.description || ''); process.exit(1); }

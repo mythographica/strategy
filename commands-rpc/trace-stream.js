@@ -108,6 +108,10 @@ async function tick (ctx, state) {
 			return;
 		}
 		const edges = Array.isArray(payload.edges) ? payload.edges : [];
+		// Source session marker: the target's pid rides each poll payload
+		// (dive-trace returns processPid) — mnemographica auto-wipes when
+		// the target restarts (VACUUM rule, 2026-08-30)
+		const session = typeof payload.processPid === 'number' ? 'pid-' + payload.processPid : undefined;
 		if (edges.length > 0) {
 			const msgId = state.nextId++;
 			const ack = await new Promise((resolve) => {
@@ -120,7 +124,7 @@ async function tick (ctx, state) {
 					jsonrpc : '2.0',
 					id      : msgId,
 					method  : 'trace/ingest',
-					params  : { edges, source: state.source }
+					params  : { edges, source: state.source, session }
 				}));
 			});
 			if (!ack || ack.error) {

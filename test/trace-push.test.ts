@@ -55,7 +55,7 @@ function makeCtx (store: Map<string | symbol, unknown>, args: Record<string, unk
 
 describe('rpc_trace_push', () => {
 	let wsServer: WebSocket.Server;
-	let received: Array<{ edges: FakeEdge[]; source: string }>;
+	let received: Array<{ edges: FakeEdge[]; source: string; session?: string }>;
 	let wsUrl: string;
 
 	beforeEach(async () => {
@@ -101,7 +101,7 @@ describe('rpc_trace_push', () => {
 	test('start subscribes in-target; notifications forward in arrival order', async () => {
 		const store = new Map<string | symbol, unknown>();
 		const session = makeSession();
-		store.set('ws', { session });
+		store.set('ws', { session, pid: 1234 });
 		const ctx = makeCtx(store);
 
 		const started = await tracePush.run(makeCtx(store, { action: 'start', url: wsUrl, source: 'jest' }));
@@ -120,6 +120,10 @@ describe('rpc_trace_push', () => {
 		expect(received[0].edges.map((edge) => edge.id)).toEqual([1, 2]);
 		expect(received[1].edges.map((edge) => edge.id)).toEqual([3]);
 		expect(received[0].source).toBe('jest');
+		// VACUUM rule: the target's pid rides every batch as the session
+		// marker, so mnemographica auto-wipes on a source restart
+		expect(received[0].session).toBe('pid-1234');
+		expect(received[1].session).toBe('pid-1234');
 
 		const status = await tracePush.run(makeCtx(store, { action: 'status' }));
 		expect(status.batchesReceived).toBe(2);

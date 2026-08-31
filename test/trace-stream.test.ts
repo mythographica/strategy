@@ -26,7 +26,7 @@ function makeCtx (store: Map<string | symbol, unknown>, edgesPerPoll: FakeEdge[]
 					pollIndex++;
 					return {
 						success : true,
-						result  : { success: true, edgeCount: edges.length, edges }
+						result  : { success: true, edgeCount: edges.length, edges, processPid: 4321 }
 					};
 				}
 			};
@@ -114,6 +114,9 @@ describe('rpc_trace_stream', () => {
 		expect(received[0].edges.map((edge) => edge.id)).toEqual([1, 2]);
 		expect(received[1].edges.map((edge) => edge.id)).toEqual([3]);
 		expect(received[0].source).toBe('jest');
+		// VACUUM rule: processPid from the poll payload rides as the
+		// session marker, so mnemographica auto-wipes on target restart
+		expect((received[0] as { session?: string }).session).toBe('pid-4321');
 
 		const stopped = await traceStream.run(Object.assign({}, ctx, { args: { action: 'stop' } }));
 		expect(stopped.running).toBe(false);

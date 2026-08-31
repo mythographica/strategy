@@ -1,6 +1,6 @@
 {
 	"name": "@mnemonica/strategy",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "MCP server that lets AI agents inspect, define, and hot-swap Mnemonica types inside a running Node.js process — CDP bootstrap, then a WebSocket construction channel",
 	"main": "lib/index.js",
 	"types": "lib/index.d.ts",

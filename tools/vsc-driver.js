@@ -13,7 +13,12 @@ const fs = require('node:fs');
 const req = createRequire('/code/mnemonica/strategy/lib/server.js');
 const CDP = req('chrome-remote-interface');
 
-const PORTS = { ext: 9233, ui: 9223 };
+// Ports default to the canonical rig; override via env when a second
+// dev-host instance runs alongside another VS Code (parallel rig).
+const PORTS = {
+	ext : Number(process.env.VSC_DRIVER_EXT_PORT) || 9233,
+	ui  : Number(process.env.VSC_DRIVER_UI_PORT) || 9223
+};
 
 async function pickTarget (port, slot) {
 	const targets = await CDP.List({ port });

@@ -17,8 +17,13 @@ const req = createRequire('/code/mnemonica/strategy/lib/server.js');
 	};
 	const runConnection = loadTopLevel('/code/mnemonica/strategy/commands-rpc/CDP/connection.js');
 
-	console.log('connect:', JSON.stringify(await runConnection(ctxFor({ action: 'connect', port: 9229 }))));
-	console.log('start:', JSON.stringify(await stream.run(ctxFor({ action: 'start', intervalMs: 300, source: 'live-proof' }))));
+	// MNEM_WS_URL / TRACE_CDP_PORT override the canonical rig endpoints for
+	// a parallel dev-host instance (see vsc-driver.js port env vars).
+	const cdpPort = Number(process.env.TRACE_CDP_PORT) || 9229;
+	const wsUrl = process.env.MNEM_WS_URL || undefined;
+
+	console.log('connect:', JSON.stringify(await runConnection(ctxFor({ action: 'connect', port: cdpPort }))));
+	console.log('start:', JSON.stringify(await stream.run(ctxFor({ action: 'start', intervalMs: 300, source: 'live-proof', url: wsUrl }))));
 
 	setInterval(async () => {
 		try {

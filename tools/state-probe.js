@@ -14,7 +14,8 @@ const WebSocket = req('ws');
 	if (sample !== undefined) params.sample = sample;
 	if (level) params.level = level;
 
-	const ws = new WebSocket('ws://127.0.0.1:9231');
+	const wsUrl = process.env.MNEM_WS_URL || 'ws://127.0.0.1:9231';
+	const ws = new WebSocket(wsUrl);
 	await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
 	const answer = await new Promise((resolve, reject) => {
 		ws.on('message', (raw) => {

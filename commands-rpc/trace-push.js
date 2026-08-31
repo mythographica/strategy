@@ -120,7 +120,7 @@ async function forwardEdges (state, edges) {
 				jsonrpc : '2.0',
 				id      : msgId,
 				method  : 'trace/ingest',
-				params  : { edges, source: state.source }
+				params  : { edges, source: state.source, session: state.sourceSession }
 			}));
 		});
 		if (!ack || ack.error) {
@@ -187,6 +187,9 @@ async function startPush (ctx, commandArgs, existing) {
 		running         : true,
 		session,
 		ws,
+		// Source session marker: the target's pid, so mnemographica can
+		// auto-wipe when the target restarts (VACUUM rule, 2026-08-30)
+		sourceSession   : typeof channel.pid === 'number' ? 'pid-' + channel.pid : undefined,
 		events          : (subscription && subscription.events) || [],
 		batchesReceived : 0,
 		edgesReceived   : 0,
