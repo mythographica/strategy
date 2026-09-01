@@ -502,6 +502,9 @@
 				duration: (edge.duration === undefined) ? null : edge.duration,
 				ts: edge.ts,
 				instanceType: instanceTypeOf(edge.instance),
+				// dive >= 0.8.3: explicit vs ambient attribution — the
+				// panel distrusts ambient bulbs; null on older dive
+				instanceSource: edge.instanceSource || null,
 				traceId: traceId,
 			};
 		}
