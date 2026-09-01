@@ -1,0 +1,22 @@
+	{
+	"linkPatterns": [
+		{
+			"type": "tags",
+			"key": "code.filepath",
+			"url": "vscode://file/#{code.filepath}:#{code.lineno}",
+			"text": "Open #{code.filepath}:#{code.lineno}:#{code.column} in VS Code"
+		},
+		{
+			"type": "tags",
+			"key": "dive.root_edge_id",
+			"url": "vscode://mnemonica.mnemographica/trace?root=#{dive.root_edge_id}",
+			"text": "Isolate dive trace root #{dive.root_edge_id} in mnemographica (Live Trace + 3D)"
+		},
+		{
+			"type": "traces",
+			"url": "vscode://mnemonica.mnemographica/trace?jaeger=#{traceID}",
+			"text": "Open this trace in mnemographica (matches by traceId — survives ring-window roots)"
+		}
+	],
+	"topTagPrefixes": ["dive.", "code.", "mnemonica."]
+}

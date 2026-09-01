@@ -6,4 +6,7 @@ export { StrategyServer } from './server';
 export { CDPConnection } from './cdp-connection';
 export { TacticaComparison } from './tactica-comparison';
 export { StrategyRuntime, CommandContext, StrategyConnection } from './strategy-types';
+export { WSSession } from './ws-session';
+export { startStrategyClient } from './client';
+export type { StrategyClientHandle, StrategyClientOptions } from './client';
 //# sourceMappingURL=index.d.ts.map

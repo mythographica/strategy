@@ -10,6 +10,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { loadCommands, listCommands, getCommandHelp, getCommandPath, isLocalCommand, type CommandContext } from './command-loader';
 import { StrategyRuntime, type StrategyRuntimeInstance } from './strategy-types';
+import { startLogSocket } from './log-socket';
+import { logInfo } from './logger';
 
 /**
  * Symbol for store metadata
@@ -328,8 +330,17 @@ export class StrategyServer {
 	}
 
 	async run (): Promise<void> {
+		// Optional TCP log mirror: when spawned as a child (Mnemographica or
+		// any MCP client), stderr may go nowhere useful — with
+		// STRATEGY_LOG_PORT set, every log line is also pushed to whoever
+		// connects on that port (see log-socket.ts).
+		const logPort = Number(process.env.STRATEGY_LOG_PORT) || 0;
+		if (logPort > 0) {
+			const actualPort = await startLogSocket(logPort);
+			logInfo(`Strategy log socket listening on 127.0.0.1:${actualPort}`);
+		}
 		const transport = new StdioServerTransport();
 		await this.server.connect(transport);
-		console.error('Strategy MCP server running on stdio');
+		logInfo('Strategy MCP server running on stdio');
 	}
 }

@@ -434,6 +434,8 @@
 		// polls over CDP. Construction edges ride the opt-in 'create' event
 		// (@mnemonica/dive >= 0.8.0); on older dive the channel still pushes
 		// invocation edges via 'enter' and reports create as unsupported.
+		// 'leave'/'settle' re-publish the SAME edge id with its completion
+		// (status + duration) — subscribers must upsert by id, not append.
 		var traceSubscribers = new Set();
 		var traceBuffer = [];
 		var TRACE_BUFFER_CAP = 5000;
@@ -484,6 +486,13 @@
 		}
 
 		function mapTraceEdge (edge) {
+			// Wanted #2: the adapter publishes edgeId → OTEL traceId on a
+			// global map (it owns the spans; we cannot see them here), so
+			// mnemographica's Live Trace can offer the "Open in Jaeger" jump
+			var traceIds = globalThis.__mnemonicaDiveTraceIds;
+			var traceId = (traceIds && typeof traceIds.get === 'function')
+				? (traceIds.get(edge.id) || null)
+				: null;
 			return {
 				id: edge.id,
 				parentId: edge.parentId,
@@ -493,6 +502,7 @@
 				duration: (edge.duration === undefined) ? null : edge.duration,
 				ts: edge.ts,
 				instanceType: instanceTypeOf(edge.instance),
+				traceId: traceId,
 			};
 		}
 
@@ -543,7 +553,10 @@
 
 			var wanted = (params && Array.isArray(params.events) && params.events.length > 0)
 				? params.events
-				: ['enter', 'create'];
+				// enter/create alone leave every call edge 'running' forever —
+				// leave/settle carry the completion (status + duration) and
+				// surface errors, so they are in the default set
+				: ['enter', 'create', 'leave', 'settle'];
 			var unsupported = [];
 
 			if (traceHookDetach.length === 0) {
@@ -699,7 +712,10 @@
 
 		await new Promise(function (resolve, reject) {
 			server.once('error', reject);
-			server.listen(0, '127.0.0.1', resolve);
+			// Self-hosted path (startStrategyClient) may pin the port via a
+			// global; CDP injection never sets it and stays ephemeral.
+			var opts = global.__strategyWSOptions || {};
+			server.listen(opts.port || 0, '127.0.0.1', resolve);
 		});
 		var port = server.address().port;
 

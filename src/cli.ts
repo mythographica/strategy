@@ -2,6 +2,7 @@
 'use strict';
 
 import { StrategyServer } from './server';
+import { logError } from './logger';
 
 /**
  * CLI entry point for Mnemonica Strategy MCP Server
@@ -12,6 +13,6 @@ async function main (): Promise<void> {
 }
 
 main().catch((error) => {
-	console.error('Fatal error:', error);
+	logError('Fatal error:', error);
 	process.exit(1);
 });

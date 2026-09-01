@@ -4,10 +4,19 @@
 # turns on /api/ai/mcp/ on the query port (:16686) — the official agent surface
 # (search_traces, get_trace_topology, get_critical_path, ...).
 #
-# Run:
+# The `ui.config_file` mount adds link patterns (jaeger-ui.json): span tags
+# `code.filepath` become `vscode://file/...` jumps and `dive.root_edge_id`
+# becomes a `vscode://mnemonica.mnemographica/trace?root=N` jump into the
+# Live Trace sidebar (Wanted #1). The browser asks once for permission to
+# open the vscode:// protocol.
+#
+# Run (from the strategy repo root):
+#   npm run jaegger:pre-configured        # → bin/Jaegger-conf.sh (idempotent)
+# or by hand:
 #   docker run -d --name jaeger-mnem \
 #     -p 16686:16686 -p 4318:4318 \
 #     -v /code/mnemonica/strategy/tools/jaeger-v2.yaml:/etc/jaeger/config.yaml \
+#     -v /code/mnemonica/strategy/tools/jaeger-ui.json:/etc/jaeger/ui.json \
 #     jaegertracing/jaeger:latest --config /etc/jaeger/config.yaml
 
 service:
@@ -28,6 +37,8 @@ extensions:
     ai:
       # Serves the telemetry MCP tools at /api/ai/mcp/ on the query port.
       enable_mcp: true
+    ui:
+      config_file: /etc/jaeger/ui.json
 
   jaeger_storage:
     backends:

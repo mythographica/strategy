@@ -22,7 +22,7 @@
  *       "events": {
  *         "type": "array",
  *         "items": { "type": "string" },
- *         "description": "dive hook events to subscribe in-target (default: ['enter', 'create'])"
+ *         "description": "dive hook events to subscribe in-target (default: ['enter', 'create', 'leave', 'settle'])"
  *       },
  *       "flushMs": {
  *         "type": "number",

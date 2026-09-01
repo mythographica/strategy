@@ -2,6 +2,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { logInfo } from './logger';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const CDP = require('chrome-remote-interface');
@@ -30,7 +31,7 @@ export class CDPConnection {
 				host: this.host,
 				port: this.port,
 			});
-			console.error(`Connected to Node.js at ${this.host}:${this.port}`);
+			logInfo(`Connected to Node.js at ${this.host}:${this.port}`);
 		} catch (error) {
 			throw new Error(
 				`Failed to connect to Node.js debug port: ${error instanceof Error ? error.message : String(error)}`
@@ -45,7 +46,7 @@ export class CDPConnection {
 		if (this.client) {
 			await this.client.close();
 			this.client = null;
-			console.error('Disconnected from Node.js');
+			logInfo('Disconnected from Node.js');
 		}
 	}
 
