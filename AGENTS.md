@@ -301,7 +301,7 @@ dev tooling and intentionally NOT in the published `files` list, same as
 The user-facing live demo (target + VS Code + stream) is
 `mnemographica/scripts/live-demo.sh`. Traps (dconf holding devtools
 ports, stale xvfb screenshots, recordCreation arg order) are documented
-in `core/reports/session-state-2026-08-28.md`.
+in `mnemographica/AGENTS.md` (headless-instance notes).
 
 ## Dependency policy
 
