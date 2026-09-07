@@ -12,8 +12,8 @@ target Node.js process via the Chrome Debug Protocol (CDP) — zero
 instrumentation of the target — then moves construction traffic onto a
 WebSocket channel injected into that process. Apps that may instrument
 themselves can skip CDP entirely: see **The app-side client module**
-below. The long-term UX goal (errored trace → one click → debugger
-reproduction on real data) lives in [`docs/northstar.md`](./docs/northstar.md).
+below. The long-term UX goal: errored trace → one click → debugger
+reproduction on real data.
 The development-mode side of the same channel (defining and swapping
 constructors in a live app, no restart) is documented in
 [`docs/live-craft.md`](./docs/live-craft.md).

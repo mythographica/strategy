@@ -11,11 +11,11 @@ Strategy is the live bridge between a running Mnemonica runtime and the
 tools around it. It attaches to a target Node.js process via the Chrome
 Debug Protocol (CDP) — zero instrumentation of the target — and then moves
 the real work onto a fast WebSocket construction channel injected into the
-process. It is designed as the central point: agents drive it over MCP
-today; visualization tooling ([Mnemographica](https://github.com/mythographica))
-is planned as a monitoring client — the bridge topology is decided
-(Strategy standalone, Mnemographica as satellite) but the link itself is
-**not implemented yet**.
+process. It is the central point of the topology: agents drive it over MCP;
+[Mnemographica](https://github.com/mythographica/mnemographica) connects as
+the monitoring client — through Strategy's own trace channel, or DIRECTLY to
+an app's self-hosted channel (`startStrategyClient` + `traceSubscribe`, the
+App Channel tab — no CDP in between).
 
 The development loop this enables — the main server **never stops**:
 
