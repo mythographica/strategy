@@ -1,4 +1,6 @@
 import * as net from 'node:net';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { startLogSocket, stopLogSocket } from '../src/log-socket';
 import { logInfo, setLogBroadcast } from '../src/logger';
 import { startStrategyClient, type StrategyClientHandle } from '../src/client';
@@ -92,4 +94,45 @@ describe('startStrategyClient (app-side self-hosted channel)', () => {
 			WSSession.connect('127.0.0.1', port, 'whatever')
 		).rejects.toThrow();
 	});
+
+	// Electron renderers (sandbox:false preload) strip global/process/Buffer
+	// from the main world once the preload's sync phase ends; the channel
+	// keeps serving afterwards (the welcome frame reads process.pid, the
+	// frame codec reads Buffer). The client must bind those globals at call
+	// time — simulated in a child, since deleting them in-process would
+	// break jest itself.
+	test('payload survives Node globals removed after boot (Electron preload world)', () => {
+		const child = `
+			const { startStrategyClient } = require(${JSON.stringify(join(__dirname, '../lib/index.js'))});
+			const net = require('node:net');
+			const proc = process; const B = Buffer;
+			(async () => {
+				const handle = await startStrategyClient();
+				delete globalThis.process; delete globalThis.Buffer; delete globalThis.global;
+				const key = B.alloc(16).toString('base64');
+				const sock = net.connect(handle.port, '127.0.0.1', () => {
+					sock.write('GET /?token=' + handle.token + ' HTTP/1.1\\r\\n'
+						+ 'Host: 127.0.0.1\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n'
+						+ 'Sec-WebSocket-Key: ' + key + '\\r\\nSec-WebSocket-Version: 13\\r\\n\\r\\n');
+				});
+				let acc = B.alloc(0);
+				const bail = (why) => { console.log(JSON.stringify({ ok: false, why: why })); proc.exit(0); };
+				const timer = setTimeout(() => bail('timeout'), 8000);
+				sock.on('error', (e) => { clearTimeout(timer); bail(String(e)); });
+				sock.on('data', (chunk) => {
+					acc = B.concat([acc, chunk]);
+					const s = acc.toString('utf8');
+					if (s.indexOf('"op":"welcome"') >= 0 && s.indexOf('"pid":') >= 0) {
+						clearTimeout(timer);
+						console.log(JSON.stringify({ ok: true }));
+						proc.exit(0);
+					}
+				});
+			})().catch((e) => { console.log(JSON.stringify({ ok: false, why: String(e && e.message || e) })); proc.exit(0); });
+		`;
+		const out = spawnSync(process.execPath, ['-e', child], { encoding: 'utf8', timeout: 20000 });
+		expect(out.error).toBeUndefined();
+		const line = (out.stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+		expect(JSON.parse(line)).toEqual({ ok: true });
+	}, 30000);
 });

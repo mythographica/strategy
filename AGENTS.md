@@ -282,21 +282,19 @@ disposable):
   open (for watching the panel while edges flow)
 - `state-probe.js` — mnemographica `state/query` readback (server | graph |
   trace | view | logs)
-- `jaeger-v2.yaml` + `jaeger-ui.json` — the Jaeger all-in-one config and
-  its UI link patterns: span tags `code.filepath` → `vscode://file/...`
-  jumps, `dive.root_edge_id` / trace-level links →
-  `vscode://mnemonica.mnemographica/trace?...` (Jaeger → Live Trace loop).
-  Both files are mounted into the container by `bin/Jaegger-conf.sh`
-  (`npm run jaegger:pre-configured`, idempotent restart)
+
+The Jaeger all-in-one starter (container config + UI link patterns for
+the Jaeger → Live Trace loop) lives with the demo app:
+`tactica-nestjs/scripts/` (`Jaegger-conf.sh`, `jaeger-v2.yaml`,
+`jaeger-ui.json` — `npm run jaegger:pre-configured` there)
 
 ## bin/ — starter scripts for complex commands
 
-Multiline operational commands (docker runs with mounts, multi-step
-harnesses) live as executable scripts in `bin/`, each wired to an npm
-script in package.json so the entry point stays `npm run <name>`. First
-occupant: `Jaegger-conf.sh` → `npm run jaegger:pre-configured`. `bin/` is
-dev tooling and intentionally NOT in the published `files` list, same as
-`tools/`.
+Multiline operational commands (multi-step harnesses) live as executable
+scripts in `bin/`, each wired to an npm script in package.json so the
+entry point stays `npm run <name>`. Occupant: `live-craft-demo.js` →
+`npm run live-craft:demo`. `bin/` is dev tooling and intentionally NOT
+in the published `files` list, same as `tools/`.
 
 The user-facing live demo (target + VS Code + stream) is
 `mnemographica/scripts/live-demo.sh`. Traps (dconf holding devtools
@@ -306,7 +304,7 @@ in `mnemographica/AGENTS.md` (headless-instance notes).
 ## Dependency policy
 
 Real pinned ranges, no `^0.x` placeholders. `mnemonica` is a peer
-(`^1.2.7`) and a devDependency (for build/tests). Note the peer is about
+(`^1.3.1`) and a devDependency (for build/tests). Note the peer is about
 API compatibility of the extraction scripts, not about sharing a process —
 the target's mnemonica copy is always the one that matters at runtime.
 `ws` is a runtime dependency: the strategy-side WS client only; the
