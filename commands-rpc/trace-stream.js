@@ -2,7 +2,7 @@
  * MCP Tool Metadata:
  * {
  *   "name": "rpc_trace_stream",
- *   "description": "Stream dive-trace deltas from the CDP-connected target into mnemographica's WS channel (trace/ingest on :9231). Polls rpc_dive_trace with a monotonic sinceId and pushes each batch; ambient 'server is alive' illumination for the 3D panel (B1.4).",
+ *   "description": "Stream dive-trace deltas from the CDP-connected target into mnemographica's WS channel (trace/ingest on :9231). Polls rpc_dive_trace with a monotonic sinceId and pushes each batch; ambient 'server is alive' illumination for the 3D panel (B1.4). Object-linked model: deltas are the RUNNING set (new unfinished fibers) — completions arrive via the trace-push channel, not here.",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {
@@ -110,7 +110,7 @@ async function tick (ctx, state) {
 		const edges = Array.isArray(payload.edges) ? payload.edges : [];
 		// Source session marker: the target's pid rides each poll payload
 		// (dive-trace returns processPid) — mnemographica auto-wipes when
-		// the target restarts (VACUUM rule, 2026-08-30)
+		// the target restarts (VACUUM rule)
 		const session = typeof payload.processPid === 'number' ? 'pid-' + payload.processPid : undefined;
 		if (edges.length > 0) {
 			const msgId = state.nextId++;

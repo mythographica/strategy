@@ -1,12 +1,16 @@
 // This script is executed in the target Node.js runtime via CDP (Chrome Debug Protocol)
 // It runs inside the target process, not in MCP
 //
-// Dumps the target's dive execution-flow trace (getTrace, @mnemonica/dive
-// >= 0.6.0) as JSON-safe data: edge objects hold live instance references,
-// which cannot cross returnByValue, so each edge is mapped to
-// { id, parentId, name, kind, status, duration, ts, instanceType }.
-// args.sinceId (optional) keeps only edges with id > sinceId — the polling
-// delta for a visualization client.
+// Object-linked dive: there is no whole-trace dump — retention is the
+// edges' own object links. What stays enumerable in-target is the RUNNING
+// set (getRunningEdges — the unfinished fibers) plus the stats counters.
+// Completed history is collected by design; full flows belong to the push
+// channel (traceSubscribe in cdp-scripts/ws-server.js — leave/settle carry
+// completions), and getFlow(target) answers a known object or Error.
+// Edges map to { id, parentId, name, kind, status, duration, ts,
+// instanceType, instanceSource } — JSON-safe: live instance references
+// cannot cross returnByValue. args.sinceId (optional) keeps only edges with
+// id > sinceId — the polling delta for a visualization client.
 
 (async function() {
 	try {
@@ -14,7 +18,7 @@
 		// as every cdp-script (mainModule.require → getBuiltinModule +
 		// createRequire → node:module dynamic import last resort). Never a bare
 		// require. The TARGET's own @mnemonica/dive copy is the one that holds
-		// the trace — dive state is module-level.
+		// the edges — dive state is module-level.
 		var targetRequire;
 		if (process.mainModule && process.mainModule.require) {
 			targetRequire = process.mainModule.require.bind(process.mainModule);
@@ -29,10 +33,10 @@
 
 		var dive = targetRequire('@mnemonica/dive');
 
-		if (typeof dive.getTrace !== 'function') {
+		if (typeof dive.getRunningEdges !== 'function') {
 			return {
 				success: false,
-				error: 'target runtime has no dive.getTrace — needs @mnemonica/dive >= 0.6.0',
+				error: 'target runtime has no dive.getRunningEdges — needs the object-linked @mnemonica/dive',
 				diveVersion: null
 			};
 		}
@@ -65,7 +69,7 @@
 			? args.sinceId
 			: 0;
 
-		var edges = dive.getTrace()
+		var edges = dive.getRunningEdges()
 			.filter(function (edge) { return edge.id > sinceId; })
 			.map(function (edge) {
 				return {
@@ -85,8 +89,17 @@
 
 		return {
 			success: true,
+			model: 'object-linked',
+			note: 'running edges only — completed edges collect by design; use the push channel (traceSubscribe) for full flows',
 			edgeCount: edges.length,
 			edges: edges,
+			stats: (dive.stats && typeof dive.stats === 'object') ? {
+				running: dive.stats.running,
+				recorded: dive.stats.recorded,
+				alive: dive.stats.alive,
+				collectedEdges: dive.stats.collectedEdges,
+				collectedInstances: dive.stats.collectedInstances
+			} : null,
 			processPid: process.pid,
 			timestamp: new Date().toISOString()
 		};

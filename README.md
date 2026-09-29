@@ -354,6 +354,25 @@ marks the construction channel: `ws_bootstrap` lives in `commands-rpc/`
 (it needs CDP to get in), every other `ws_*` command lives in
 `commands-mcp/` and talks to the stored WS session.
 
+## How strategy's own types are preserved
+
+Strategy's live state (runtime, command contexts, connections, channels)
+is typed as mnemonica types in `src/strategy-types.ts`, using **builder
+mode on the default collection**: a `mnemonica.define(...)` chain whose
+value carries a LOCAL registry derived from the handlers. The exported
+API is the builder value (`StrategyTypes`) plus the looked-up
+constructors (`StrategyTypes.lookup('StrategyRuntime')` and the
+children) — never the raw `define()` results — so declaration emit
+stays portable on TypeScript 6 (mnemonica >= 1.3.6; see mnemonica
+`docs/typed-lookup.md`, "Declaration emit on TypeScript 6").
+
+| | hand-written `TypeRegistry` merge | builder mode (this repo) |
+|---|---|---|
+| registry scope | global (module augmentation) | local, carried by the exported value |
+| derived from | hand-written declarations | the handlers in this file |
+| drift | can drift from the handlers | cannot drift |
+| code change | minimal (one merge block) | chain value + lookups |
+
 ## Development
 
 ```bash
@@ -411,7 +430,7 @@ if (process.mainModule && process.mainModule.require) {
 
 Scripts using it must be async IIFEs. `ws-server.js` generalizes the same
 three tiers into a `targetRequire` factory because it also needs
-`node:http`/`node:crypto` — see AGENTS.md for the variant rule.
+`node:http`/`node:crypto`.
 
 ```javascript
 // Access types via the defaultCollection Map (avoids proxy enumeration issues)

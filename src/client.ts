@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * The app-side Strategy client (2026-09-01, Strategy reframe).
+ * The app-side Strategy client.
  *
  * One call — `startStrategyClient()` — self-hosts the WS construction/trace
  * channel INSIDE the calling application. No CDP, no --inspect, nothing

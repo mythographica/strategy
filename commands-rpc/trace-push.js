@@ -2,7 +2,7 @@
  * MCP Tool Metadata:
  * {
  *   "name": "rpc_trace_push",
- *   "description": "Push channel: the target's own dive hooks (enter/create via traceSubscribe on the in-target WS) drive trace edges to mnemographica — no CDP polling. Requires ws_bootstrap first. getTrace/dive-trace stay for exact queries.",
+ *   "description": "Push channel: the target's own dive hooks (enter/create via traceSubscribe on the in-target WS) drive trace edges to mnemographica — no CDP polling. Requires ws_bootstrap first. dive-trace stays for the running-set snapshot; full flows ride this channel.",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {
@@ -188,7 +188,7 @@ async function startPush (ctx, commandArgs, existing) {
 		session,
 		ws,
 		// Source session marker: the target's pid, so mnemographica can
-		// auto-wipe when the target restarts (VACUUM rule, 2026-08-30)
+		// auto-wipe when the target restarts (VACUUM rule)
 		sourceSession   : typeof channel.pid === 'number' ? 'pid-' + channel.pid : undefined,
 		events          : (subscription && subscription.events) || [],
 		batchesReceived : 0,

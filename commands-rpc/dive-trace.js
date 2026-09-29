@@ -2,7 +2,7 @@
  * MCP Tool Metadata:
  * {
  *   "name": "rpc_dive_trace",
- *   "description": "Dump the target runtime's dive execution-flow trace (JSON-safe edges) via CDP",
+ *   "description": "Dump the target runtime's RUNNING dive edges + stats (JSON-safe) via CDP — object-linked model: completed history collects by design, the push channel (traceSubscribe) carries full flows",
  *   "inputSchema": {
  *     "type": "object",
  *     "properties": {

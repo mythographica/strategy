@@ -1,6 +1,6 @@
 'use strict';
 
-import { define } from 'mnemonica';
+import { mnemonica } from 'mnemonica';
 import type { TypeConstructor } from 'mnemonica';
 
 /**
@@ -19,6 +19,12 @@ import type { TypeConstructor } from 'mnemonica';
  * Command files are plain JS evaluated via `new Function('ctx', ...)`; they
  * only ever destructure props off these instances, which works identically
  * through mnemonica's proxy layer.
+ *
+ * Typing: builder mode on the default collection. The chain value carries
+ * a LOCAL registry derived from the handlers, so it cannot drift; the
+ * exported API is the looked-up constructors — never the raw define()
+ * results — which keeps declaration emit portable on TypeScript 6
+ * (see mnemonica docs/typed-lookup.md, "Declaration emit on TypeScript 6").
  */
 
 export interface StrategyRuntimeInstance {
@@ -52,12 +58,18 @@ export interface WSChannelInstance {
 	session     : unknown;
 }
 
-export const StrategyRuntime = define('StrategyRuntime', function (this: StrategyRuntimeInstance, version: string) {
+// the builder value: root definition on the default collection, exported —
+// its registry is local and handler-derived, so the export is the API root
+export const StrategyTypes = mnemonica.define('StrategyRuntime', function (this: StrategyRuntimeInstance, version: string) {
 	this.initialized = Date.now();
 	this.version = version;
 });
 
-export const CommandContext = StrategyRuntime.define('CommandContext', function (
+// children defined on the root constructor value (paths StrategyRuntime.X);
+// exported directly — the builder-rooted registry is local, so these
+// define() results name only the public vocabulary and declaration emit
+// stays portable on TypeScript 6
+export const CommandContext = StrategyTypes.define('CommandContext', function (
 	this: CommandContextInstance,
 	requireFn: NodeJS.Require,
 	store: Map<string | symbol, unknown>,
@@ -70,7 +82,7 @@ export const CommandContext = StrategyRuntime.define('CommandContext', function 
 	this.runtime = runtime;
 });
 
-export const StrategyConnection = StrategyRuntime.define('StrategyConnection', function (
+export const StrategyConnection = StrategyTypes.define('StrategyConnection', function (
 	this: StrategyConnectionInstance,
 	host: string,
 	port: number
@@ -82,7 +94,7 @@ export const StrategyConnection = StrategyRuntime.define('StrategyConnection', f
 	this.connection = null;
 });
 
-export const WSChannel = StrategyRuntime.define('WSChannel', function (
+export const WSChannel = StrategyTypes.define('WSChannel', function (
 	this: WSChannelInstance,
 	port: number,
 	pid: number,
@@ -95,3 +107,6 @@ export const WSChannel = StrategyRuntime.define('WSChannel', function (
 	this.connectedAt = Date.now();
 	this.session = session;
 });
+
+// the root constructor itself, looked up from the builder value
+export const StrategyRuntime = StrategyTypes.lookup('StrategyRuntime');
