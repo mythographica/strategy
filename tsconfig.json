@@ -12,7 +12,18 @@
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,
-		"resolveJsonModule": true
+		"resolveJsonModule": true,
+		// jest globals: with compilerOptions.types set, ONLY the listed
+		// @types packages load — jest 30 globals need @types/jest explicit
+		// (bumped here together with jest ^30, 2026-09-29)
+		"types": ["node", "jest", "ws"],
+		// exact reason: under ts-jest the 'ws' import resolves to the runtime
+		// package (no bundled types) WITHOUT the @types/ws fallback that plain
+		// tsc applies, so WebSocket.Server loses its type; the paths pin gives
+		// every program (tsc and ts-jest alike) the @types/ws declaration
+		"paths": {
+			"ws": ["./node_modules/@types/ws"]
+		}
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "lib", "**/*.test.ts"]
