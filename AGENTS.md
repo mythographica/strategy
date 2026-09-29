@@ -148,7 +148,10 @@ commands-run/                     context: RUN (local side effects)
 cdp-scripts/                      payloads for Runtime.evaluate (NOT commands)
   analyze-hierarchy.js
   create-type.js
-  dive-trace.js                       JSON-safe dump of the target's dive trace
+  dive-trace.js                       JSON-safe dump of the target's RUNNING
+                                      dive edges + stats (object-linked model:
+                                      no ring — completed history collects,
+                                      full flows ride the push channel)
   ws-server.js                        in-target WS construction server;
                                       traceSubscribe bridges dive hook events to subscribers
                                       (default set enter/create/leave/settle — leave/settle
@@ -270,7 +273,7 @@ harness is the standard target).
 ## tools/ — agent CDP drivers (canonical, NOT published)
 
 Reusable harnesses for driving a VS Code extension-dev instance and the
-trace channel over CDP/WS (moved out of /tmp 2026-08-30; /tmp copies are
+trace channel over CDP/WS (canonical copies; /tmp copies are
 disposable):
 
 - `vsc-driver.js` — `ext '<expr>'` / `ui '<expr>'` / `shot file.png`

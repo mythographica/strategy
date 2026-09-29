@@ -317,7 +317,7 @@
 			var impl = compileHandler(body);
 			// Born shimmed: mnemonica keeps THIS stable shell forever; swap
 			// reassigns `impl` behind it. No core change — the shim lives in
-			// this session's closure (Viktor's design, 2026-08-22).
+			// this session's closure (Viktor's design).
 			var shim = function () {
 				return impl.apply(this, arguments);
 			};

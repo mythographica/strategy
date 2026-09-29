@@ -47,8 +47,8 @@
  */
 
 // The live channel (trace-stream / trace-push) illuminates NOW; this
-// command illuminates THEN — Jaeger retains what the ring buffer evicted,
-// and the dive.* tags survive the OTLP round-trip unchanged.
+// command illuminates THEN — Jaeger retains what the live trace no longer
+// holds, and the dive.* tags survive the OTLP round-trip unchanged.
 
 function tagValue (span, key) {
 	const tag = (span.tags || []).find((t) => t.key === key);

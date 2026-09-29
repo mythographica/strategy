@@ -4,7 +4,7 @@ import { createServer, Server, Socket } from 'node:net';
 import { setLogBroadcast } from './logger';
 
 /**
- * TCP log mirror (2026-09-01, Strategy reframe).
+ * TCP log mirror.
  *
  * When Strategy is spawned as a child (by Mnemographica or any MCP client),
  * its stderr may not be surfaced anywhere useful. With STRATEGY_LOG_PORT set
