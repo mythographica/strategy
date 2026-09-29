@@ -429,17 +429,32 @@
 				};
 				patchedRegistry.set(path, record);
 			}
-			var handler = compileHandler(body);
+			// Automatic, UNIQUE DevTools name per patch version, so each
+			// patch is listed and searched separately (human-watched session
+			// finding: anonymous new Function scripts are hidden, and two
+			// patches with the same name confuse DevTools — V8 keeps old
+			// patch scripts in memory). A caller-provided sourceURL is
+			// stripped first so the automatic one always wins.
+			var patchNo = record.patches + 1;
+			var sourceURL = 'strategy-patch/' + path + '@' + patchNo + '.js';
+			var stripped = body.replace(/\/\/#[ \t]*sourceURL=[^\n]*/g, '');
+			var annotated = stripped + '\n//# sourceURL=' + sourceURL;
+			var handler = compileHandler(annotated);
 			var factory = compileFactoryInTarget(
 				desc.TypeName,
 				!!(desc.config && desc.config.asClass),
 				handler
 			);
-			record.stack.push({ factory: factory, source: body });
+			record.stack.push({ factory: factory, source: annotated });
 			desc.constructHandler = factory;
 			record.patches += 1;
 			record.lastPatchAt = Date.now();
-			return { path: path, patches: record.patches, depth: record.stack.length };
+			return {
+				path      : path,
+				patches   : record.patches,
+				depth     : record.stack.length,
+				sourceURL : sourceURL
+			};
 		}
 
 		function opRollback (params) {

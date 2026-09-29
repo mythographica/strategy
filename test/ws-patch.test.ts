@@ -15,6 +15,7 @@ interface RootInstance {
 }
 interface SubInstance extends RootInstance { sub : string }
 interface OtherInstance { o : number }
+interface UrlWidgetInstance { tag : string }
 
 const PatchWidget = define('PatchWidget', function (this : WidgetInstance, v : number) {
 	this.value = v;
@@ -27,6 +28,9 @@ PatchRoot.define('PatchSub', function (this : SubInstance) {
 });
 const PatchOther = define('PatchOther', function (this : OtherInstance) {
 	this.o = 1;
+});
+const PatchURLWidget = define('PatchURLWidget', function (this : UrlWidgetInstance) {
+	this.tag = 'orig';
 });
 
 describe('ws patch (live handler replacement)', () => {
@@ -160,5 +164,38 @@ describe('ws patch (live handler replacement)', () => {
 		const rolled = await session.request('rollback', { all: true }) as { rolledBack : string[] };
 		expect(rolled.rolledBack).toContain('PatchWidget');
 		expect(new PatchWidget(2).value).toBe(2);
+	});
+
+	test('every patch gets an automatic, unique sourceURL per version', async () => {
+		// a caller-provided sourceURL is stripped — the automatic unique one wins
+		const first = await session.request('patch', {
+			path: 'PatchURLWidget',
+			body: 'function () { this.tag = "v1"; }\n//# sourceURL=my-own-name.js'
+		}) as { patches : number; sourceURL : string };
+		expect(first.sourceURL).toBe('strategy-patch/PatchURLWidget@1.js');
+		expect(first.patches).toBe(1);
+		expect(new PatchURLWidget().tag).toBe('v1');
+
+		const second = await session.request('patch', {
+			path: 'PatchURLWidget',
+			body: 'function () { this.tag = "v2"; }'
+		}) as { patches : number; sourceURL : string };
+		expect(second.sourceURL).toBe('strategy-patch/PatchURLWidget@2.js');
+		expect(new PatchURLWidget().tag).toBe('v2');
+
+		const list = await session.request('patched', {}) as {
+			patched : Array<{ path : string; sources : string[] }>;
+		};
+		const entry = list.patched.find((e) => e.path === 'PatchURLWidget')!;
+		expect(entry.sources.length).toBe(2);
+		// the annotated body is recorded: one sourceURL each, the caller's gone
+		entry.sources.forEach((source, i) => {
+			expect(source).toContain('strategy-patch/PatchURLWidget@' + (i + 1) + '.js');
+			expect(source.match(/sourceURL=/g)!.length).toBe(1);
+		});
+		expect(entry.sources[0]!).not.toContain('my-own-name');
+
+		await session.request('rollback', { all: true });
+		expect(new PatchURLWidget().tag).toBe('orig');
 	});
 });
