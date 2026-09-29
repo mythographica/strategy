@@ -11,6 +11,13 @@
 // handshake; it crosses the wire exactly once, as this script's CDP result.
 //
 // Ops: ping | define | swap | instantiate | eval | list | traceSubscribe | traceUnsubscribe
+//       | patch | rollback | patched
+// patch {path, body} replaces an EXISTING type's construct handler in place
+// (option B-by-path): the raw descriptor is reached via
+// lookup(path).subtypes[SymbolParentType] — NEVER defineProperty on the
+// TypeProxy, it lands on core's SHARED InstanceCreator (probe D). The
+// original factory is saved once per path per session; rollback re-installs
+// it exactly. Works for root and subtype paths of the app's own types.
 // Types defined here are BORN SHIMMED: mnemonica keeps a stable shell
 // constructor whose `impl` lives in this script's closure; `swap` reassigns
 // `impl`. Only session-born types are swappable — no re-definition of
@@ -60,6 +67,11 @@
 		// Session registry: full type path → swap handle. Lives in this
 		// closure; dies with the process, exactly like the shim impls.
 		var registry = new Map();
+
+		// Live-patch registry: full type path → { original, patches }.
+		// Originals are saved ONCE per path per session, so rollback always
+		// restores the true pre-patch factory. Dies with the process.
+		var patchedRegistry = new Map();
 
 		var WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 		var MAX_MESSAGE = 16 * 1024 * 1024;
@@ -354,6 +366,131 @@
 			return { path: path, swaps: entry.swaps };
 		}
 
+		// --- Live patch (option B-by-path) --------------------------------
+		// Raw descriptor, bypassing the TypeProxy: subtypes[SymbolParentType]
+		// on the subtypes Map is the TypeDescriptor itself (probe D: going
+		// through the proxy lands on the shared InstanceCreator).
+		function rawDescriptorByPath (path) {
+			var Ctor = mnemonica.lookup(path);
+			if (!Ctor) {
+				throw new Error('patch: type not found: "' + path + '"');
+			}
+			var subtypes = Ctor.subtypes;
+			var desc = subtypes && subtypes[mnemonica.SymbolParentType];
+			if (!desc) {
+				throw new Error('patch: no raw descriptor for "' + path + '" — is it a mnemonica type?');
+			}
+			return desc;
+		}
+
+		// The mnemonica package ships an exports map (1.3.6) that blocks
+		// subpath requires — resolve the package root from the main entry
+		// and require the internals BY FILE, which bypasses exports.
+		function mnemonicaRootDir () {
+			var main = targetRequire.resolve('mnemonica');
+			var normalized = main.replace(/\\/g, '/');
+			var marker = normalized.lastIndexOf('/mnemonica/');
+			if (marker < 0) {
+				throw new Error('patch: cannot locate the mnemonica package root from ' + main);
+			}
+			var root = normalized.slice(0, marker + '/mnemonica'.length);
+			return main.indexOf('\\') !== -1 ? root.replace(/\//g, '\\') : root;
+		}
+
+		function targetCompileModule () {
+			try {
+				var sep = mnemonicaRootDir().indexOf('\\') !== -1 ? '\\' : '/';
+				var file = mnemonicaRootDir() + sep + 'build' + sep + 'api' + sep + 'types' + sep + 'compileNewModificatorFunctionBody.js';
+				return targetRequire(file).default;
+			} catch (e) {
+				throw new Error('patch: cannot load mnemonica compile internals from the target: ' + e.message);
+			}
+		}
+
+		function targetCreationHandler () {
+			try {
+				var sep = mnemonicaRootDir().indexOf('\\') !== -1 ? '\\' : '/';
+				var file = mnemonicaRootDir() + sep + 'build' + sep + 'api' + sep + 'utils' + sep + 'index.js';
+				return targetRequire(file).CreationHandler;
+			} catch (e) {
+				throw new Error('patch: cannot load mnemonica CreationHandler from the target: ' + e.message);
+			}
+		}
+
+		function opPatch (params) {
+			var path = params.path;
+			var body = params.body;
+			if (!path || typeof path !== 'string') {
+				throw new Error('patch: "path" is required');
+			}
+			if (!body || typeof body !== 'string') {
+				throw new Error('patch: "body" (function source string) is required');
+			}
+			var desc = rawDescriptorByPath(path);
+			var record = patchedRegistry.get(path);
+			if (!record) {
+				record = {
+					original  : desc.constructHandler,
+					patches   : 0,
+					lastPatchAt : null
+				};
+				patchedRegistry.set(path, record);
+			}
+			var compile = targetCompileModule();
+			var CreationHandler = targetCreationHandler();
+			var handler = compileHandler(body);
+			var factory = compile(
+				desc.TypeName,
+				!!(desc.config && desc.config.asClass)
+			)(
+				handler,
+				CreationHandler,
+				mnemonica.SymbolConstructorName
+			);
+			desc.constructHandler = factory;
+			record.patches += 1;
+			record.lastPatchAt = Date.now();
+			return { path: path, patches: record.patches };
+		}
+
+		function opRollback (params) {
+			params = params || {};
+			if (params.all) {
+				var rolledBack = [];
+				patchedRegistry.forEach(function (record, path) {
+					var desc = rawDescriptorByPath(path);
+					desc.constructHandler = record.original;
+					rolledBack.push(path);
+				});
+				patchedRegistry.clear();
+				return { rolledBack: rolledBack };
+			}
+			var path = params.path;
+			if (!path) {
+				throw new Error('rollback: "path" or { all: true } is required');
+			}
+			var record = patchedRegistry.get(path);
+			if (!record) {
+				throw new Error('rollback: "' + path + '" has no saved original — nothing to roll back');
+			}
+			var desc = rawDescriptorByPath(path);
+			desc.constructHandler = record.original;
+			patchedRegistry.delete(path);
+			return { rolledBack: [path] };
+		}
+
+		function opPatched () {
+			var entries = [];
+			patchedRegistry.forEach(function (record, path) {
+				entries.push({
+					path        : path,
+					patches     : record.patches,
+					lastPatchAt : record.lastPatchAt
+				});
+			});
+			return { patched: entries };
+		}
+
 		async function opInstantiate (params) {
 			var path = params.path;
 			if (!path) {
@@ -617,6 +754,12 @@
 				return opDefine(params);
 			case 'swap':
 				return opSwap(params);
+			case 'patch':
+				return opPatch(params);
+			case 'rollback':
+				return opRollback(params);
+			case 'patched':
+				return opPatched();
 			case 'instantiate':
 				return await opInstantiate(params);
 			case 'eval':
@@ -738,7 +881,7 @@
 			token: token,
 			pid: process.pid,
 			protocol: 1,
-			ops: ['ping', 'define', 'swap', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
+			ops: ['ping', 'define', 'swap', 'patch', 'rollback', 'patched', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
 		};
 	} catch (e) {
 		return { success: false, error: e.message, stack: e.stack };
