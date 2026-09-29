@@ -111,6 +111,37 @@ describe('ws patch (live handler replacement)', () => {
 		expect(new PatchWidget(2).value).toBe(2);
 	});
 
+	test('rollback pops ONE step — two patches, one rollback keeps the first patch', async () => {
+		await session.request('patch', { path: 'PatchWidget', body: 'function (v) { this.value = v * 2; }' });
+		await session.request('patch', { path: 'PatchWidget', body: 'function (v) { this.value = v * 3; }' });
+		expect(new PatchWidget(2).value).toBe(6);
+
+		const popped = await session.request('rollback', { path: 'PatchWidget' }) as { depth : number };
+		expect(popped.depth).toBe(1);
+		expect(new PatchWidget(2).value).toBe(4);   // the FIRST patch is active again
+
+		await session.request('rollback', { path: 'PatchWidget' });
+		expect(new PatchWidget(2).value).toBe(2);   // stack emptied -> original
+
+		// rollback { path, all: true } jumps straight to the original
+		await session.request('patch', { path: 'PatchWidget', body: 'function (v) { this.value = v * 7; }' });
+		await session.request('patch', { path: 'PatchWidget', body: 'function (v) { this.value = v * 8; }' });
+		await session.request('rollback', { path: 'PatchWidget', all: true });
+		expect(new PatchWidget(2).value).toBe(2);
+
+		// rollback to the original removes the record entirely
+		const list = await session.request('patched', {}) as { patched : Array<{ path : string; depth : number; sources : string[] }> };
+		expect(list.patched.find((e) => e.path === 'PatchWidget')).toBeUndefined();
+
+		// a fresh patch starts a new stack and lists depth + sources
+		await session.request('patch', { path: 'PatchWidget', body: 'function (v) { this.value = v * 2; }' });
+		const relisted = await session.request('patched', {}) as { patched : Array<{ path : string; depth : number; sources : string[] }> };
+		const widget = relisted.patched.find((e) => e.path === 'PatchWidget')!;
+		expect(widget.depth).toBe(1);
+		expect(widget.sources.length).toBe(1);
+		await session.request('rollback', { path: 'PatchWidget' });
+	});
+
 	test('an unknown path fails with a readable error', async () => {
 		await expect(
 			session.request('patch', { path: 'NoSuchType', body: 'function () {}' })

@@ -383,38 +383,27 @@
 			return desc;
 		}
 
-		// The mnemonica package ships an exports map (1.3.6) that blocks
-		// subpath requires — resolve the package root from the main entry
-		// and require the internals BY FILE, which bypasses exports.
-		function mnemonicaRootDir () {
-			var main = targetRequire.resolve('mnemonica');
-			var normalized = main.replace(/\\/g, '/');
-			var marker = normalized.lastIndexOf('/mnemonica/');
-			if (marker < 0) {
-				throw new Error('patch: cannot locate the mnemonica package root from ' + main);
+		// Compile through a THROWAWAY collection: core's own define pipeline
+		// wraps the handler exactly as it does for any real type (class vs
+		// function, CreationHandler wiring); the compiled factory is lifted
+		// off the throwaway type's RAW descriptor (subtypes[SymbolParentType]
+		// — the same probe-D-safe route used for the target types). No build
+		// internals, no exports-map bypass: only the public mnemonica surface.
+		// The throwaway type is named after the REAL descriptor's TypeName:
+		// the name is baked into the compiled factory (SymbolConstructorName
+		// stamp + constructor name), and post-build validation checks the
+		// instance against the descriptor's TypeName. The throwaway
+		// collection is isolated, so the shared name collides with nothing.
+		function compileFactoryInTarget (typeName, asClass, handler) {
+			var candidate = handler;
+			if (asClass) {
+				var fn = handler;
+				candidate = class extends fn {};
 			}
-			var root = normalized.slice(0, marker + '/mnemonica'.length);
-			return main.indexOf('\\') !== -1 ? root.replace(/\//g, '\\') : root;
-		}
-
-		function targetCompileModule () {
-			try {
-				var sep = mnemonicaRootDir().indexOf('\\') !== -1 ? '\\' : '/';
-				var file = mnemonicaRootDir() + sep + 'build' + sep + 'api' + sep + 'types' + sep + 'compileNewModificatorFunctionBody.js';
-				return targetRequire(file).default;
-			} catch (e) {
-				throw new Error('patch: cannot load mnemonica compile internals from the target: ' + e.message);
-			}
-		}
-
-		function targetCreationHandler () {
-			try {
-				var sep = mnemonicaRootDir().indexOf('\\') !== -1 ? '\\' : '/';
-				var file = mnemonicaRootDir() + sep + 'build' + sep + 'api' + sep + 'utils' + sep + 'index.js';
-				return targetRequire(file).CreationHandler;
-			} catch (e) {
-				throw new Error('patch: cannot load mnemonica CreationHandler from the target: ' + e.message);
-			}
+			var tmp = mnemonica.createTypesCollection();
+			var tmpType = tmp.define(typeName, candidate);
+			var tmpDesc = tmpType.subtypes[mnemonica.SymbolParentType];
+			return tmpDesc.constructHandler;
 		}
 
 		function opPatch (params) {
@@ -429,37 +418,37 @@
 			var desc = rawDescriptorByPath(path);
 			var record = patchedRegistry.get(path);
 			if (!record) {
+				// bottom of the stack: the original factory. Its source is
+				// not recoverable at runtime (the runtime keeps only the
+				// compiled wrapper) — recorded as null.
 				record = {
-					original  : desc.constructHandler,
-					patches   : 0,
+					original    : { factory: desc.constructHandler, source: null },
+					stack       : [],
+					patches     : 0,
 					lastPatchAt : null
 				};
 				patchedRegistry.set(path, record);
 			}
-			var compile = targetCompileModule();
-			var CreationHandler = targetCreationHandler();
 			var handler = compileHandler(body);
-			var factory = compile(
+			var factory = compileFactoryInTarget(
 				desc.TypeName,
-				!!(desc.config && desc.config.asClass)
-			)(
-				handler,
-				CreationHandler,
-				mnemonica.SymbolConstructorName
+				!!(desc.config && desc.config.asClass),
+				handler
 			);
+			record.stack.push({ factory: factory, source: body });
 			desc.constructHandler = factory;
 			record.patches += 1;
 			record.lastPatchAt = Date.now();
-			return { path: path, patches: record.patches };
+			return { path: path, patches: record.patches, depth: record.stack.length };
 		}
 
 		function opRollback (params) {
 			params = params || {};
-			if (params.all) {
+			if (params.all && !params.path) {
 				var rolledBack = [];
 				patchedRegistry.forEach(function (record, path) {
 					var desc = rawDescriptorByPath(path);
-					desc.constructHandler = record.original;
+					desc.constructHandler = record.original.factory;
 					rolledBack.push(path);
 				});
 				patchedRegistry.clear();
@@ -470,13 +459,27 @@
 				throw new Error('rollback: "path" or { all: true } is required');
 			}
 			var record = patchedRegistry.get(path);
-			if (!record) {
-				throw new Error('rollback: "' + path + '" has no saved original — nothing to roll back');
+			if (!record || record.stack.length === 0) {
+				throw new Error('rollback: "' + path + '" has no patches — nothing to roll back');
 			}
 			var desc = rawDescriptorByPath(path);
-			desc.constructHandler = record.original;
-			patchedRegistry.delete(path);
-			return { rolledBack: [path] };
+			if (params.all) {
+				// rollback { path, all: true } — straight to the original
+				record.stack.length = 0;
+				desc.constructHandler = record.original.factory;
+				patchedRegistry.delete(path);
+				return { rolledBack: [path] };
+			}
+			// pop ONE step: the previous stack top, or the original when the
+			// stack empties
+			record.stack.pop();
+			if (record.stack.length === 0) {
+				desc.constructHandler = record.original.factory;
+				patchedRegistry.delete(path);
+			} else {
+				desc.constructHandler = record.stack[record.stack.length - 1].factory;
+			}
+			return { rolledBack: [path], depth: record.stack.length };
 		}
 
 		function opPatched () {
@@ -485,6 +488,8 @@
 				entries.push({
 					path        : path,
 					patches     : record.patches,
+					depth       : record.stack.length,
+					sources     : record.stack.map(function (step) { return step.source; }),
 					lastPatchAt : record.lastPatchAt
 				});
 			});
