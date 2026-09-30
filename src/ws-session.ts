@@ -59,17 +59,21 @@ export class WSSession {
 		socket.on('error', () => {});
 	}
 
-	static async connect (host: string, port: number, token: string): Promise<WSSession> {
-		const url = `ws://${host}:${port}/?token=${token}`;
+	static async connect (host: string, port: number, token: string, path: string = '/'): Promise<WSSession> {
+		const url = `ws://${host}:${port}${path}?token=${token}`;
 		const socket = new WebSocket(url, {
 			// the in-target server caps messages at 16 MiB; match it here
 			maxPayload: 16 * 1024 * 1024,
 		});
+		// Attach handlers BEFORE awaiting 'open': the server sends the welcome
+		// frame with the handshake, and on a same-process (mounted) channel it
+		// can arrive within the turn 'open' resolves — subscribing after the
+		// await races it and loses the welcome forever.
+		const session = new WSSession(socket);
 		await new Promise<void>((resolve, reject) => {
 			socket.once('open', () => resolve());
 			socket.once('error', (err: Error) => reject(err));
 		});
-		const session = new WSSession(socket);
 		return session;
 	}
 

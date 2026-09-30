@@ -64,6 +64,15 @@
 		}
 
 		var token = crypto.randomBytes(24).toString('hex');
+		// Mount/role options — self-hosted path only (startStrategyClient sets
+		// them through global.__strategyWSOptions); the CDP path never does:
+		// full ops, own ephemeral listener. role: 'observer' = traces only
+		// (write ops refused), 'debug' = hot-swap tools only (trace ops
+		// refused), no role = full surface (today's behaviour).
+		var opts = global.__strategyWSOptions || {};
+		var role = opts.role || null;
+		var mountServer = opts.server || null;
+		var mountPath = opts.path || '/strategy';
 		// Session registry: full type path → swap handle. Lives in this
 		// closure; dies with the process, exactly like the shim impls.
 		var registry = new Map();
@@ -765,8 +774,20 @@
 			return { subscribed: false };
 		}
 
+		// Role gates (target architecture: main OBSERVES, the secondary is
+		// CHANGED). observer — traces only: every write op refused readably.
+		// debug — hot-swap tools only: trace ops refused. No role = full.
+		var WRITE_OPS = ['define', 'swap', 'patch', 'rollback', 'instantiate', 'eval'];
+		var TRACE_OPS = ['traceSubscribe', 'traceUnsubscribe'];
+
 		async function dispatch (msg, send) {
 			var params = msg.params || {};
+			if (role === 'observer' && WRITE_OPS.indexOf(msg.op) !== -1) {
+				throw new Error('"' + msg.op + '" is refused on this channel: role "observer" is traces-only (no write ops)');
+			}
+			if (role === 'debug' && TRACE_OPS.indexOf(msg.op) !== -1) {
+				throw new Error('"' + msg.op + '" is refused on this channel: role "debug" is hot-swap tools only (no trace ops)');
+			}
 			switch (msg.op) {
 			case 'ping':
 				return { pong: true, timestamp: Date.now() };
@@ -808,6 +829,8 @@
 				pid: process.pid,
 				mnemonica: mnemonicaVersion(),
 				rootTypes: rootTypeNames(),
+				role: role,
+				path: mountServer ? mountPath : null,
 			});
 
 			var onData = makeFrameParser(
@@ -852,10 +875,15 @@
 			});
 		}
 
-		var server = http.createServer();
-		server.on('upgrade', function (req, socket) {
+		function upgradeHandler (req, socket) {
 			try {
 				var url = new URL(req.url, 'http://localhost');
+				// Mounted mode shares the app http.Server with other upgrade
+				// consumers (e.g. infer-debug's inspector tunnel): only our own
+				// path is claimed here — anything else is left for them.
+				if (mountServer && url.pathname !== mountPath) {
+					return;
+				}
 				var key = req.headers['sec-websocket-key'];
 				if (url.searchParams.get('token') !== token || !key) {
 					socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -874,24 +902,52 @@
 					socket.destroy();
 				} catch (destroyErr) {}
 			}
-		});
+		}
 
-		await new Promise(function (resolve, reject) {
-			server.once('error', reject);
-			// Self-hosted path (startStrategyClient) may pin the port via a
-			// global; CDP injection never sets it and stays ephemeral.
-			var opts = global.__strategyWSOptions || {};
-			server.listen(opts.port || 0, '127.0.0.1', resolve);
-		});
-		var port = server.address().port;
+		var server;
+		if (mountServer) {
+			// Mounted mode: no own listener — the channel rides the app's
+			// http.Server as an upgrade path (target architecture: one pod,
+			// one port). The app stays the owner of the server, always.
+			mountServer.on('upgrade', upgradeHandler);
+			server = mountServer;
+		} else {
+			server = http.createServer();
+			server.on('upgrade', upgradeHandler);
+			await new Promise(function (resolve, reject) {
+				server.once('error', reject);
+				// Self-hosted path (startStrategyClient) may pin the port via a
+				// global; CDP injection never sets it and stays ephemeral.
+				server.listen(opts.port || 0, '127.0.0.1', resolve);
+			});
+		}
+		var address = typeof server.address === 'function' ? server.address() : null;
+		var port = address && typeof address === 'object' ? address.port : null;
 
 		global.__strategyWS = {
 			listening: true,
 			server: server,
+			mounted: !!mountServer,
+			role: role,
 			token: token,
 			port: port,
 			registry: registry,
 			startedAt: Date.now(),
+			// Teardown that NEVER kills the host: mounted mode only detaches
+			// the upgrade listener; standalone closes its own server.
+			stop: function () {
+				Array.from(traceSubscribers).forEach(function (send) {
+					dropTraceSubscriber(send);
+				});
+				if (traceFlushTimer) {
+					clearInterval(traceFlushTimer);
+					traceFlushTimer = null;
+				}
+				server.removeListener('upgrade', upgradeHandler);
+				if (!mountServer && typeof server.close === 'function') {
+					try { server.close(); } catch (closeErr) {}
+				}
+			},
 		};
 
 		return {

@@ -2,6 +2,8 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Server as HttpServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 /**
  * The app-side Strategy client.
@@ -33,6 +35,22 @@ interface WsServerBootstrapResult {
 export interface StrategyClientOptions {
 	/** Fixed port for the channel; 0 or omitted = ephemeral (default). */
 	port?: number;
+	/**
+	 * An EXISTING http.Server to mount the channel on (target architecture:
+	 * one pod, one port). No own listener is opened; the channel answers WS
+	 * upgrades on `path` of this server. The app stays the owner — `stop()`
+	 * only detaches the upgrade listener.
+	 */
+	server?: HttpServer;
+	/** Upgrade path for the mounted channel (default '/strategy'). */
+	path?: string;
+	/**
+	 * 'observer' — traces only: every write op (eval/patch/rollback/swap/
+	 * define/instantiate) is refused with a readable error. 'debug' — hot-swap
+	 * tools only (patch/rollback/patched/eval): trace ops refused. Omit for
+	 * the full surface.
+	 */
+	role?: 'observer' | 'debug';
 }
 
 export interface StrategyClientHandle {
@@ -49,8 +67,14 @@ interface StrategyWSGlobal {
 		server?: { close: (cb: () => void) => void };
 		port: number;
 		token: string;
+		stop?: () => void;
 	};
-	__strategyWSOptions?: { port?: number };
+	__strategyWSOptions?: {
+		port?: number;
+		server?: HttpServer;
+		path?: string;
+		role?: 'observer' | 'debug';
+	};
 }
 
 export async function startStrategyClient (
@@ -74,8 +98,13 @@ export async function startStrategyClient (
 	const nodeBuffer = typeof Buffer !== 'undefined' ? Buffer : undefined;
 	const bag = nodeGlobal as unknown as StrategyWSGlobal;
 
-	if (options.port) {
-		bag.__strategyWSOptions = { port: options.port };
+	if (options.port || options.server || options.path || options.role) {
+		bag.__strategyWSOptions = {
+			port   : options.port,
+			server : options.server,
+			path   : options.path,
+			role   : options.role,
+		};
 	}
 
 	// The payload is a bare async-IIFE expression; wrap it so the factory
@@ -85,31 +114,40 @@ export async function startStrategyClient (
 		`return (${script});`
 	) as (g: unknown, p: unknown, b: unknown) => Promise<WsServerBootstrapResult>;
 	const bootstrap = await factory(nodeGlobal, nodeProcess, nodeBuffer);
-	if (!bootstrap || !bootstrap.success || typeof bootstrap.port !== 'number' || !bootstrap.token) {
+	if (!bootstrap || !bootstrap.success || !bootstrap.token) {
 		const failure = (bootstrap && bootstrap.error) || 'ws-server script reported failure';
 		throw new Error(`startStrategyClient: ${failure}`);
 	}
+	// Standalone always has a number; mounted may report null when the app
+	// server is not listening yet — resolve it from the server, else 0.
+	const port = typeof bootstrap.port === 'number'
+		? bootstrap.port
+		: (options.server
+			? ((options.server.address() as AddressInfo | null)?.port ?? 0)
+			: 0);
 
 	const stop = async (): Promise<void> => {
 		const running = bag.__strategyWS;
-		if (!running || !running.server) {
+		if (!running) {
 			return;
 		}
-		const closed = new Promise<void>((resolve) => {
-			const serverRef = running.server;
-			if (serverRef) {
-				serverRef.close(() => resolve());
-			} else {
-				resolve();
-			}
-		});
-		await closed;
+		// Mounted teardown detaches only the upgrade listener; standalone
+		// closes the channel's own server. Either way the app is untouched.
+		if (typeof running.stop === 'function') {
+			running.stop();
+		} else if (running.server) {
+			const closed = new Promise<void>((resolve) => {
+				running.server?.close(() => resolve());
+			});
+			await closed;
+		}
 		running.listening = false;
 		delete bag.__strategyWS;
+		delete bag.__strategyWSOptions;
 	};
 
 	const handle: StrategyClientHandle = {
-		port           : bootstrap.port,
+		port,
 		token          : bootstrap.token,
 		pid            : bootstrap.pid || process.pid,
 		alreadyRunning : bootstrap.alreadyRunning === true,
