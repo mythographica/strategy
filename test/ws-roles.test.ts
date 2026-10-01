@@ -189,3 +189,51 @@ describe('mounted channel + debug role', () => {
 		expect(new RoleWidget().mark).toBe('orig');
 	});
 });
+
+describe('mounted channel with attach:false (hand the handler to the app router)', () => {
+	let appServer : HttpServer;
+	let handle : StrategyClientHandle;
+	let port : number;
+	// second consumer 404s everything UNTIL the router test hands the path
+	// to the channel's own handler (then it yields /strategy to it)
+	const channelAlive = { value: false };
+
+	beforeAll(async () => {
+		appServer = createServer((req, res) => {
+			res.writeHead(200, { 'content-type': 'text/plain' });
+			res.end('app-reply');
+		});
+		claimOtherUpgradePaths(appServer, '/strategy', channelAlive);
+		port = await listen(appServer);
+		handle = await startStrategyClient({
+			server : appServer,
+			path   : '/strategy',
+			role   : 'debug',
+			attach : false,
+		});
+	});
+
+	afterAll(async () => {
+		await handle.stop();
+		appServer.close();
+	});
+
+	test('does not self-attach; the exposed handler works once handed to the router', async () => {
+		expect(typeof handle.upgradeHandler).toBe('function');
+
+		// nobody serves /strategy yet — the second consumer 404s it
+		await expect(
+			WSSession.connect('127.0.0.1', port, handle.token, '/strategy')
+		).rejects.toThrow();
+
+		// the app (or infer-debug's appUpgradeHandler) now owns the routing
+		appServer.on('upgrade', handle.upgradeHandler!);
+		channelAlive.value = true; // the second consumer yields /strategy now
+
+		const session = await WSSession.connect('127.0.0.1', port, handle.token, '/strategy');
+		await waitFor(() => session.welcome !== null);
+		expect(session.welcome).toMatchObject({ role: 'debug', path: '/strategy' });
+		expect(await session.request('ping', {})).toMatchObject({ pong: true });
+		session.close();
+	});
+});

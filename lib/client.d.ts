@@ -1,4 +1,7 @@
-import type { Server as HttpServer } from 'node:http';
+import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { Duplex } from 'node:stream';
+/** The channel's upgrade handling, for apps that own the upgrade routing. */
+export type StrategyUpgradeHandler = (request: IncomingMessage, socket: Duplex) => void;
 export interface StrategyClientOptions {
     /** Fixed port for the channel; 0 or omitted = ephemeral (default). */
     port?: number;
@@ -18,12 +21,23 @@ export interface StrategyClientOptions {
      * the full surface.
      */
     role?: 'observer' | 'debug';
+    /**
+     * false (mounted mode only): do NOT self-attach to the server's 'upgrade'
+     * event. Instead the returned handle carries `upgradeHandler` — pass it
+     * to the app's own upgrade decision point (infer-debug's
+     * appUpgradeHandler) so relayed and local upgrades never double-claim a
+     * socket. Default true: the channel claims its own path, exactly as
+     * before.
+     */
+    attach?: boolean;
 }
 export interface StrategyClientHandle {
     port: number;
     token: string;
     pid: number;
     alreadyRunning: boolean;
+    /** Present when started with attach:false — hand it to the app's upgrade router. */
+    upgradeHandler?: StrategyUpgradeHandler;
     stop: () => Promise<void>;
 }
 export declare function startStrategyClient(options?: StrategyClientOptions): Promise<StrategyClientHandle>;

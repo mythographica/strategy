@@ -73,6 +73,12 @@
 		var role = opts.role || null;
 		var mountServer = opts.server || null;
 		var mountPath = opts.path || '/strategy';
+		// attach:false — the app takes the upgrade handler (exposed as
+		// upgradeHandler) and passes it to ITS OWN upgrade decision point
+		// (infer-debug's appUpgradeHandler), so nothing double-claims the
+		// socket. Mounted mode only; standalone has nothing else to hand
+		// the socket to.
+		var selfAttach = opts.attach !== false;
 		// Session registry: full type path → swap handle. Lives in this
 		// closure; dies with the process, exactly like the shim impls.
 		var registry = new Map();
@@ -909,9 +915,16 @@
 			// Mounted mode: no own listener — the channel rides the app's
 			// http.Server as an upgrade path (target architecture: one pod,
 			// one port). The app stays the owner of the server, always.
-			mountServer.on('upgrade', upgradeHandler);
+			if (selfAttach) {
+				mountServer.on('upgrade', upgradeHandler);
+			}
 			server = mountServer;
 		} else {
+			if (!selfAttach) {
+				throw new Error(
+					'attach:false needs an existing server — pass { server } and hand upgradeHandler to your own upgrade decision point'
+				);
+			}
 			server = http.createServer();
 			server.on('upgrade', upgradeHandler);
 			await new Promise(function (resolve, reject) {
@@ -933,6 +946,9 @@
 			port: port,
 			registry: registry,
 			startedAt: Date.now(),
+			// With attach:false the app owns the upgrade routing: hand this
+			// to its decision point (infer-debug's appUpgradeHandler).
+			upgradeHandler: upgradeHandler,
 			// Teardown that NEVER kills the host: mounted mode only detaches
 			// the upgrade listener; standalone closes its own server.
 			stop: function () {
@@ -943,7 +959,9 @@
 					clearInterval(traceFlushTimer);
 					traceFlushTimer = null;
 				}
-				server.removeListener('upgrade', upgradeHandler);
+				if (selfAttach) {
+					server.removeListener('upgrade', upgradeHandler);
+				}
 				if (!mountServer && typeof server.close === 'function') {
 					try { server.close(); } catch (closeErr) {}
 				}
@@ -957,6 +975,7 @@
 			token: token,
 			pid: process.pid,
 			protocol: 1,
+			upgradeHandler: selfAttach ? undefined : upgradeHandler,
 			ops: ['ping', 'define', 'swap', 'patch', 'rollback', 'patched', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
 		};
 	} catch (e) {

@@ -2,8 +2,12 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Server as HttpServer } from 'node:http';
+import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
+
+/** The channel's upgrade handling, for apps that own the upgrade routing. */
+export type StrategyUpgradeHandler = (request: IncomingMessage, socket: Duplex) => void;
 
 /**
  * The app-side Strategy client.
@@ -28,6 +32,7 @@ interface WsServerBootstrapResult {
 	port?: number;
 	token?: string;
 	pid?: number;
+	upgradeHandler?: unknown;
 	error?: string;
 	stack?: string;
 }
@@ -51,6 +56,15 @@ export interface StrategyClientOptions {
 	 * the full surface.
 	 */
 	role?: 'observer' | 'debug';
+	/**
+	 * false (mounted mode only): do NOT self-attach to the server's 'upgrade'
+	 * event. Instead the returned handle carries `upgradeHandler` — pass it
+	 * to the app's own upgrade decision point (infer-debug's
+	 * appUpgradeHandler) so relayed and local upgrades never double-claim a
+	 * socket. Default true: the channel claims its own path, exactly as
+	 * before.
+	 */
+	attach?: boolean;
 }
 
 export interface StrategyClientHandle {
@@ -58,6 +72,8 @@ export interface StrategyClientHandle {
 	token: string;
 	pid: number;
 	alreadyRunning: boolean;
+	/** Present when started with attach:false — hand it to the app's upgrade router. */
+	upgradeHandler?: StrategyUpgradeHandler;
 	stop: () => Promise<void>;
 }
 
@@ -74,6 +90,7 @@ interface StrategyWSGlobal {
 		server?: HttpServer;
 		path?: string;
 		role?: 'observer' | 'debug';
+		attach?: boolean;
 	};
 }
 
@@ -98,12 +115,13 @@ export async function startStrategyClient (
 	const nodeBuffer = typeof Buffer !== 'undefined' ? Buffer : undefined;
 	const bag = nodeGlobal as unknown as StrategyWSGlobal;
 
-	if (options.port || options.server || options.path || options.role) {
+	if (options.port || options.server || options.path || options.role || options.attach === false) {
 		bag.__strategyWSOptions = {
 			port   : options.port,
 			server : options.server,
 			path   : options.path,
 			role   : options.role,
+			attach : options.attach,
 		};
 	}
 
@@ -151,6 +169,9 @@ export async function startStrategyClient (
 		token          : bootstrap.token,
 		pid            : bootstrap.pid || process.pid,
 		alreadyRunning : bootstrap.alreadyRunning === true,
+		upgradeHandler : typeof bootstrap.upgradeHandler === 'function'
+			? bootstrap.upgradeHandler as StrategyUpgradeHandler
+			: undefined,
 		stop,
 	};
 	return handle;
