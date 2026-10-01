@@ -59,11 +59,20 @@ export class WSSession {
 		socket.on('error', () => {});
 	}
 
-	static async connect (host: string, port: number, token: string, path: string = '/'): Promise<WSSession> {
+	static async connect (
+		host: string,
+		port: number,
+		token: string,
+		path: string = '/',
+		headers?: Record<string, string>
+	): Promise<WSSession> {
 		const url = `ws://${host}:${port}${path}?token=${token}`;
 		const socket = new WebSocket(url, {
 			// the in-target server caps messages at 16 MiB; match it here
 			maxPayload: 16 * 1024 * 1024,
+			// e.g. { 'infer-debug': '1' } — asks infer-debug to relay this
+			// upgrade to the debug child instead of the main process
+			headers,
 		});
 		// Attach handlers BEFORE awaiting 'open': the server sends the welcome
 		// frame with the handshake, and on a same-process (mounted) channel it

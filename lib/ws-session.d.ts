@@ -22,7 +22,7 @@ export declare class WSSession {
      */
     welcome: WelcomeMessage | null;
     private constructor();
-    static connect(host: string, port: number, token: string, path?: string): Promise<WSSession>;
+    static connect(host: string, port: number, token: string, path?: string, headers?: Record<string, string>): Promise<WSSession>;
     get isOpen(): boolean;
     /**
      * Subscribe to an unsolicited server frame by its `op` (e.g. 'trace').
