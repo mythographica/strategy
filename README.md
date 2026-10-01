@@ -371,8 +371,10 @@ newest `?v=N` script is targeted.
 
 1. Watch the failing request in the secondary (marked requests, traces).
 2. At the failing code, read the scope — the REAL third-party data.
-3. Edit the source locally, run `tsc`, deliver with `reload` (types) /
-   `reload` or `liveEdit` (plain code). No redeployment.
+3. Edit the source locally, run `tsc`, deliver through the channel:
+   mnemonica types go through `patch` — or `reload` when the type lives in
+   a reloaded module; plain code goes through `reload`; `liveEdit` only
+   when stale destructured bindings must be reached. No redeployment.
 4. Replay the request until the reply is right.
 5. Report "debugged — commit this" with a regression test built from the
    payload captured at step 2; or, after repeated rounds, report why not
