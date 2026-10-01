@@ -526,6 +526,234 @@
 			return { patched: entries };
 		}
 
+		// --- Module reload (Mode 2) ----------------------------------------
+		// {module, code}: the agent compiles ONE module locally with the
+		// app's tsconfig (inlineSourceMap+inlineSources) and sends the JS.
+		// The secondary compiles it under its real filename — ?v=N so
+		// DevTools lists each reload separately (the embedded map still
+		// resolves to the TS) — evaluates it with define/registerHook
+		// intercepted, then replaces the OLD module.exports IN PLACE.
+		// In-flight requests finish on old code; the next request runs new.
+		// Probe (2026-10-01-module-reload): this reaches every call style
+		// except true destructured require-bindings (option (b), liveEdit,
+		// covers those — and V8 refuses it while a request is suspended in
+		// the old function: BlockedByActiveGenerator, returned verbatim).
+		var ModuleCtor = targetRequire('module');
+		var pathUtil = targetRequire('path');
+		var reloadCounts = new Map();
+
+		function swapHandlerOnExistingPath (fullPath, handler) {
+			var desc = rawDescriptorByPath(fullPath);
+			var factory = compileFactoryInTarget(
+				desc.TypeName,
+				!!(desc.config && desc.config.asClass),
+				handler
+			);
+			desc.constructHandler = factory;
+			return desc;
+		}
+
+		function opReload (params) {
+			var modulePath = params.module;
+			var code = params.code;
+			if (!modulePath || typeof modulePath !== 'string') {
+				throw new Error('reload: "module" (the built file\'s path in the running app) is required');
+			}
+			if (!code || typeof code !== 'string') {
+				throw new Error('reload: "code" (the compiled JS, map embedded) is required');
+			}
+			var resolved = pathUtil.resolve(modulePath);
+			var oldModule = ModuleCtor._cache[resolved];
+			if (!oldModule) {
+				throw new Error('reload: "' + resolved + '" is not loaded in this process — only loaded modules can be reloaded');
+			}
+			if (oldModule.parent === null) {
+				throw new Error('reload: "' + resolved + '" is the ENTRY module — reloading it is a full restart; refused');
+			}
+			var version = (reloadCounts.get(resolved) || 0) + 1;
+			var scriptName = resolved + '?v=' + version;
+
+			// intercept define during the re-evaluation: existing path → the
+			// SAME type object with only its handler swapped (instances,
+			// lookup() and subtypes stay connected); new path → normal
+			// define; a type REMOVED from the file stays declared.
+			var ownedTypes = new Map(); // path → TypeCtor
+			var origDefine = mnemonica.define;
+			var origRegisterHook = mnemonica.registerHook;
+
+			function interceptedDefine () {
+				var args = Array.prototype.slice.call(arguments);
+				if (typeof args[0] !== 'string') {
+					// source-form define(instance, 'Name', ...) — not a
+					// module-level declaration; let core handle it
+					return origDefine.apply(mnemonica, args);
+				}
+				var name = args[0];
+				var handler = args.filter(function (a, i) { return i > 0 && typeof a === 'function'; })[0];
+				var existing = mnemonica.lookup(name);
+				if (existing) {
+					if (typeof handler !== 'function') {
+						throw new Error('reload: define("' + name + '") carries no construct handler — cannot swap');
+					}
+					swapHandlerOnExistingPath(name, handler);
+					ownedTypes.set(name, existing);
+					return existing;
+				}
+				var created = origDefine.apply(mnemonica, args);
+				ownedTypes.set(name, created);
+				return created;
+			}
+			// NOTE: nested `.define()` chains on an owned type are NOT
+			// intercepted — wrapping the method would write through the
+			// TypeProxy onto core's SHARED InstanceCreator (probe D's trap).
+			// A module that re-declares EXISTING nested subtypes at top level
+			// will hear ALREADY_DECLARED (readable); patch those paths instead.
+			// Nested NEW subtypes define normally during the re-evaluation.
+
+			// hooks: a top-level registerHook by the reloaded module on a
+			// type IT defines REPLACES what it registered before (per
+			// hookType) — never adds a duplicate next to it. Hooks on types
+			// the module does not define pass through (they cannot be told
+			// apart from other modules' hooks).
+			function interceptedRegisterHook () {
+				var args = Array.prototype.slice.call(arguments);
+				var ctor = args[0];
+				var hookType = args[1];
+				var cb = args[2];
+				for (var entry of ownedTypes) {
+					if (entry[1] === ctor) {
+						if (!ctor.hooks) {
+							ctor.hooks = {};
+						}
+						ctor.hooks[hookType] = new Set([cb]);
+						return;
+					}
+				}
+				return origRegisterHook.apply(mnemonica, args);
+			}
+
+			var fresh = new ModuleCtor(scriptName, oldModule.parent);
+			fresh.filename = scriptName;
+			fresh.paths = ModuleCtor._nodeModulePaths(pathUtil.dirname(resolved));
+			mnemonica.define = interceptedDefine;
+			mnemonica.registerHook = interceptedRegisterHook;
+			var freshExports;
+			try {
+				fresh._compile(code, scriptName);
+				freshExports = fresh.exports;
+				reloadCounts.set(resolved, version);
+			} catch (compileErr) {
+				throw new Error('reload: compilation under ' + scriptName + ' failed: ' + (compileErr && compileErr.message));
+			} finally {
+				mnemonica.define = origDefine;
+				mnemonica.registerHook = origRegisterHook;
+			}
+			// (a): replace exports IN PLACE on the old module.exports object
+			var oldExports = oldModule.exports;
+			if (oldExports && typeof oldExports === 'object') {
+				for (var key of Object.keys(freshExports)) {
+					oldExports[key] = freshExports[key];
+				}
+			} else {
+				oldModule.exports = freshExports;
+			}
+			return {
+				module     : resolved,
+				version    : version,
+				scriptName : scriptName,
+				swapped    : Array.from(ownedTypes.keys()),
+			};
+		}
+
+		// --- Live edit (option b, explicit) ---------------------------------
+		// {module, code}: Debugger.setScriptSource on the running script —
+		// reaches even true destructured require-bindings, but V8 refuses
+		// while a request is suspended in the old function
+		// (BlockedByActiveGenerator — returned verbatim, per the probe).
+		// The inspector session is opened per call and never pauses.
+		async function opLiveEdit (params) {
+			var modulePath = params.module;
+			var code = params.code;
+			if (!modulePath || typeof modulePath !== 'string') {
+				throw new Error('liveEdit: "module" is required');
+			}
+			if (!code || typeof code !== 'string') {
+				throw new Error('liveEdit: "code" is required');
+			}
+			var resolved = pathUtil.resolve(modulePath);
+			var inspectorModule;
+			try {
+				inspectorModule = targetRequire('node:inspector');
+			} catch (e) {
+				throw new Error('liveEdit: node:inspector is not available in this runtime');
+			}
+			var session = new inspectorModule.Session();
+			var parsedScripts = [];
+			session.on('Debugger.scriptParsed', function (event) {
+				parsedScripts.push(event.params);
+			});
+			session.connect();
+			try {
+				await new Promise(function (resolve, reject) {
+					session.post('Debugger.enable', function (err) {
+						if (err) { reject(new Error(String(err))); } else { resolve(); }
+					});
+				});
+				// target the LIVE code: after reloads the module's current
+				// functions may live on a ?v=N script — take the highest
+				// version. NOTE: the inspector percent-encodes the '?v=' in
+				// the script name (%3Fv=1) — match both forms.
+				var prefix = 'file://' + resolved;
+				var best = null;
+				var bestV = -1;
+				parsedScripts.forEach(function (s) {
+					var idx = s.url.indexOf('?v=');
+					var enc = s.url.indexOf('%3Fv=');
+					var at = idx >= 0 ? idx : enc;
+					if (at < 0) { return; }
+					if (s.url.slice(0, at) !== prefix) { return; }
+					var v = parseInt(s.url.slice(at + (idx >= 0 ? 3 : 5)), 10);
+					if (!isNaN(v) && v > bestV) {
+						bestV = v;
+						best = s;
+					}
+				});
+				if (!best) {
+					best = parsedScripts.find(function (s) {
+						return s.url === prefix || s.url.endsWith('/' + pathUtil.basename(resolved));
+					});
+				}
+				if (!best) {
+					throw new Error('liveEdit: no parsed script for "' + resolved + '" — is the module loaded?');
+				}
+				var target = best;
+				var editResult = await new Promise(function (resolve) {
+					session.post('Debugger.setScriptSource', {
+						scriptId     : target.scriptId,
+						scriptSource : code,
+					}, function (err, result) {
+						// V8's own outcome, verbatim — incl. refusals like
+						// BlockedByActiveGenerator when a request is
+						// suspended inside the old function
+						resolve(err ? { error: String(err) } : result);
+					});
+				});
+				return {
+					module    : resolved,
+					scriptUrl : target.url,
+					edit      : editResult,
+				};
+			} finally {
+				try {
+					session.post('Debugger.disable', function () {
+						session.disconnect();
+					});
+				} catch (e) {
+					try { session.disconnect(); } catch (e2) {}
+				}
+			}
+		}
+
 		async function opInstantiate (params) {
 			var path = params.path;
 			if (!path) {
@@ -783,7 +1011,7 @@
 		// Role gates (target architecture: main OBSERVES, the secondary is
 		// CHANGED). observer — traces only: every write op refused readably.
 		// debug — hot-swap tools only: trace ops refused. No role = full.
-		var WRITE_OPS = ['define', 'swap', 'patch', 'rollback', 'instantiate', 'eval'];
+		var WRITE_OPS = ['define', 'swap', 'patch', 'rollback', 'instantiate', 'eval', 'reload', 'liveEdit'];
 		var TRACE_OPS = ['traceSubscribe', 'traceUnsubscribe'];
 
 		async function dispatch (msg, send) {
@@ -807,6 +1035,10 @@
 				return opRollback(params);
 			case 'patched':
 				return opPatched();
+			case 'reload':
+				return opReload(params);
+			case 'liveEdit':
+				return await opLiveEdit(params);
 			case 'instantiate':
 				return await opInstantiate(params);
 			case 'eval':
@@ -976,7 +1208,7 @@
 			pid: process.pid,
 			protocol: 1,
 			upgradeHandler: selfAttach ? undefined : upgradeHandler,
-			ops: ['ping', 'define', 'swap', 'patch', 'rollback', 'patched', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
+			ops: ['ping', 'define', 'swap', 'patch', 'rollback', 'patched', 'reload', 'liveEdit', 'instantiate', 'eval', 'list', 'traceSubscribe', 'traceUnsubscribe'],
 		};
 	} catch (e) {
 		return { success: false, error: e.message, stack: e.stack };
