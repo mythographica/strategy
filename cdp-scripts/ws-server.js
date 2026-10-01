@@ -541,6 +541,9 @@
 		var ModuleCtor = targetRequire('module');
 		var pathUtil = targetRequire('path');
 		var reloadCounts = new Map();
+		// reload-to-dev D review F1: which hooks each module path registered
+		// (snapshot-diffed per reload — see opReload)
+		var hookJournal = new Map();
 
 		function swapHandlerOnExistingPath (fullPath, handler) {
 			var desc = rawDescriptorByPath(fullPath);
@@ -553,7 +556,7 @@
 			return desc;
 		}
 
-		function opReload (params) {
+		async function opReload (params) {
 			var modulePath = params.module;
 			var code = params.code;
 			if (!modulePath || typeof modulePath !== 'string') {
@@ -573,13 +576,27 @@
 			var version = (reloadCounts.get(resolved) || 0) + 1;
 			var scriptName = resolved + '?v=' + version;
 
-			// intercept define during the re-evaluation: existing path → the
-			// SAME type object with only its handler swapped (instances,
-			// lookup() and subtypes stay connected); new path → normal
+			// intercept define during the re-evaluation: existing path →
+			// STAGE a handler swap (applied only after the whole module
+			// evaluates — a module that throws must not leave half-swapped
+			// types behind); the SAME type object is returned so the
+			// module's own references stay connected. New path → normal
 			// define; a type REMOVED from the file stays declared.
 			var ownedTypes = new Map(); // path → TypeCtor
+			var stagedSwaps = [];       // {path, handler}
+			var hookSnapshots = new Map(); // TypeCtor → Map(hookType → Set copy)
 			var origDefine = mnemonica.define;
-			var origRegisterHook = mnemonica.registerHook;
+
+			function snapshotHooks (ctor) {
+				if (hookSnapshots.has(ctor)) { return; }
+				var snap = new Map();
+				if (ctor.hooks) {
+					Object.keys(ctor.hooks).forEach(function (ht) {
+						snap.set(ht, new Set(ctor.hooks[ht]));
+					});
+				}
+				hookSnapshots.set(ctor, snap);
+			}
 
 			function interceptedDefine () {
 				var args = Array.prototype.slice.call(arguments);
@@ -595,12 +612,14 @@
 					if (typeof handler !== 'function') {
 						throw new Error('reload: define("' + name + '") carries no construct handler — cannot swap');
 					}
-					swapHandlerOnExistingPath(name, handler);
+					stagedSwaps.push({ path: name, handler: handler });
 					ownedTypes.set(name, existing);
+					snapshotHooks(existing);
 					return existing;
 				}
 				var created = origDefine.apply(mnemonica, args);
 				ownedTypes.set(name, created);
+				snapshotHooks(created);
 				return created;
 			}
 			// NOTE: nested `.define()` chains on an owned type are NOT
@@ -610,44 +629,95 @@
 			// will hear ALREADY_DECLARED (readable); patch those paths instead.
 			// Nested NEW subtypes define normally during the re-evaluation.
 
-			// hooks: a top-level registerHook by the reloaded module on a
-			// type IT defines REPLACES what it registered before (per
-			// hookType) — never adds a duplicate next to it. Hooks on types
-			// the module does not define pass through (they cannot be told
-			// apart from other modules' hooks).
-			function interceptedRegisterHook () {
-				var args = Array.prototype.slice.call(arguments);
-				var ctor = args[0];
-				var hookType = args[1];
-				var cb = args[2];
-				for (var entry of ownedTypes) {
-					if (entry[1] === ctor) {
-						if (!ctor.hooks) {
-							ctor.hooks = {};
-						}
-						ctor.hooks[hookType] = new Set([cb]);
-						return;
-					}
-				}
-				return origRegisterHook.apply(mnemonica, args);
+			// HOOKS (replace, never duplicate): instead of intercepting
+			// registerHook (which misses the type-method form and cannot be
+			// attributed), the owned types' hook Sets are SNAPSHOT-DIFFED:
+			// entries the journaled module registered before are removed
+			// exactly, entries added during this evaluation become the new
+			// journal. Other modules' hooks on the same type survive; two
+			// same-type hooks both stay. This covers the free export form
+			// AND Type.registerHook — both write the same Sets.
+			function removeStagedHookAdditions () {
+				hookSnapshots.forEach(function (snap, ctor) {
+					var now = ctor.hooks || {};
+					Object.keys(now).forEach(function (ht) {
+						var before = snap.get(ht) || new Set();
+						now[ht].forEach(function (cb) {
+							if (!before.has(cb)) { now[ht].delete(cb); }
+						});
+					});
+				});
 			}
 
 			var fresh = new ModuleCtor(scriptName, oldModule.parent);
 			fresh.filename = scriptName;
 			fresh.paths = ModuleCtor._nodeModulePaths(pathUtil.dirname(resolved));
 			mnemonica.define = interceptedDefine;
-			mnemonica.registerHook = interceptedRegisterHook;
 			var freshExports;
 			try {
 				fresh._compile(code, scriptName);
 				freshExports = fresh.exports;
 				reloadCounts.set(resolved, version);
 			} catch (compileErr) {
-				throw new Error('reload: compilation under ' + scriptName + ' failed: ' + (compileErr && compileErr.message));
+				// atomicity: undo the hook additions this evaluation made —
+				// handler swaps were only staged, nothing else changed
+				removeStagedHookAdditions();
+				throw new Error('reload: evaluation of ' + scriptName + ' failed: ' + (compileErr && compileErr.message));
 			} finally {
 				mnemonica.define = origDefine;
-				mnemonica.registerHook = origRegisterHook;
 			}
+			// success — commit: apply the staged handler swaps, then re-journal
+			// the hooks (remove exactly what the previous version registered,
+			// keep what this evaluation added)
+			stagedSwaps.forEach(function (swap) {
+				swapHandlerOnExistingPath(swap.path, swap.handler);
+			});
+			// FIRST reload of this module: the original load's hooks were
+			// never journaled (nothing was watching when it registered).
+			// Attribute them by source: a snapshot callback whose source text
+			// appears in the module's ORIGINAL script source (read via the
+			// debugger) belongs to this module; hooks other modules placed on
+			// the same type do not match and survive. From the second reload
+			// on, the journal itself is authoritative.
+			var prevHooks = hookJournal.get(resolved);
+			var hookSeeded = true;
+			if (prevHooks === undefined) {
+				var origSource = await fetchOriginalSource(resolved);
+				prevHooks = [];
+				if (origSource !== null) {
+					hookSnapshots.forEach(function (snap, ctor) {
+						snap.forEach(function (beforeSet, ht) {
+							beforeSet.forEach(function (cb) {
+								var src = '';
+								try { src = Function.prototype.toString.call(cb); } catch (e) {}
+								if (src && origSource.indexOf(src) !== -1) {
+									prevHooks.push({ ctor: ctor, hookType: ht, cb: cb });
+								}
+							});
+						});
+					});
+				} else {
+					hookSeeded = false;
+				}
+			}
+			prevHooks.forEach(function (e) {
+				if (e.ctor.hooks && e.ctor.hooks[e.hookType]) {
+					e.ctor.hooks[e.hookType].delete(e.cb);
+				}
+			});
+			var stagedHooks = [];
+			hookSnapshots.forEach(function (snap, ctor) {
+				var now = ctor.hooks || {};
+				Object.keys(now).forEach(function (ht) {
+					var before = snap.get(ht) || new Set();
+					now[ht].forEach(function (cb) {
+						if (!before.has(cb)) {
+							stagedHooks.push({ ctor: ctor, hookType: ht, cb: cb });
+						}
+					});
+				});
+			});
+			hookJournal.set(resolved, stagedHooks);
 			// (a): replace exports IN PLACE on the old module.exports object
 			var oldExports = oldModule.exports;
 			if (oldExports && typeof oldExports === 'object') {
@@ -662,7 +732,71 @@
 				version    : version,
 				scriptName : scriptName,
 				swapped    : Array.from(ownedTypes.keys()),
+				hookSeeded : hookSeeded,
 			};
+		}
+
+		// Original script source for first-reload hook attribution (F1):
+		// read via a short-lived inspector session, cached per module. null
+		// when the debugger cannot surface the script (hooks then keep the
+		// conservative behavior: originals linger, never foreign removals).
+		var origSourceCache = new Map();
+		async function fetchOriginalSource (resolved) {
+			if (origSourceCache.has(resolved)) {
+				return origSourceCache.get(resolved);
+			}
+			var result = null;
+			var inspectorModule;
+			try {
+				inspectorModule = targetRequire('node:inspector');
+			} catch (e) {
+				origSourceCache.set(resolved, null);
+				return null;
+			}
+			var session = new inspectorModule.Session();
+			var found = null;
+			session.on('Debugger.scriptParsed', function (event) {
+				if (!found && event.params.url === 'file://' + resolved) {
+					found = event.params;
+				}
+			});
+			session.connect();
+			try {
+				await new Promise(function (resolve, reject) {
+					session.post('Debugger.enable', function (err) {
+						if (err) { reject(new Error(String(err))); } else { resolve(); }
+					});
+				});
+				await new Promise(function (resolve, reject) {
+					session.post('Debugger.setSkipAllPauses', { skip: true }, function (err) {
+						if (err) { reject(new Error(String(err))); } else { resolve(); }
+					});
+				});
+				if (found) {
+					var srcResult = await new Promise(function (resolve) {
+						session.post('Debugger.getScriptSource', { scriptId: found.scriptId }, function (err, res) {
+							resolve(err ? null : res);
+						});
+					});
+					if (srcResult && typeof srcResult.scriptSource === 'string') {
+						result = srcResult.scriptSource;
+					}
+				}
+			} catch (e) {
+				result = null;
+			} finally {
+				try {
+					session.post('Debugger.setSkipAllPauses', { skip: false }, function () {
+						session.post('Debugger.disable', function () {
+							session.disconnect();
+						});
+					});
+				} catch (e) {
+					try { session.disconnect(); } catch (e2) {}
+				}
+			}
+			origSourceCache.set(resolved, result);
+			return result;
 		}
 
 		// --- Live edit (option b, explicit) ---------------------------------
@@ -696,6 +830,17 @@
 			try {
 				await new Promise(function (resolve, reject) {
 					session.post('Debugger.enable', function (err) {
+						if (err) { reject(new Error(String(err))); } else { resolve(); }
+					});
+				});
+				// F3: while our session has the debugger enabled, a
+				// 'debugger;' statement or a pause-on-exception would pause
+				// the thread and NOTHING in-process could resume it — a
+				// permanent hang. Skip all pauses for OUR session only (does
+				// not affect a human's own debugger session) for the duration
+				// of the edit, then restore.
+				await new Promise(function (resolve, reject) {
+					session.post('Debugger.setSkipAllPauses', { skip: true }, function (err) {
 						if (err) { reject(new Error(String(err))); } else { resolve(); }
 					});
 				});
@@ -745,8 +890,10 @@
 				};
 			} finally {
 				try {
-					session.post('Debugger.disable', function () {
-						session.disconnect();
+					session.post('Debugger.setSkipAllPauses', { skip: false }, function () {
+						session.post('Debugger.disable', function () {
+							session.disconnect();
+						});
 					});
 				} catch (e) {
 					try { session.disconnect(); } catch (e2) {}
@@ -1036,7 +1183,7 @@
 			case 'patched':
 				return opPatched();
 			case 'reload':
-				return opReload(params);
+				return await opReload(params);
 			case 'liveEdit':
 				return await opLiveEdit(params);
 			case 'instantiate':
