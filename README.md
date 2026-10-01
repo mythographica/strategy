@@ -247,6 +247,142 @@ execute {
 }
 ```
 
+## Live development on a running app
+
+Strategy can change a running app **in flight** — no restart, no
+redeploy. Two modes share one mechanism: the app (or its debug child)
+self-hosts the channel, and every change reaches the type registry or the
+module system behind the same constructor and module identities the app
+already holds.
+
+### The channel as a path on the app's own server
+
+`startStrategyClient({ server, path, role, attach? })` mounts the channel
+on an EXISTING `http.Server` as a WebSocket upgrade path (default
+`/strategy`) — no separate port. Two roles split the surface:
+
+| role | serves | refuses |
+|---|---|---|
+| `observer` (the main process) | traces (`traceSubscribe`), reads (`ping`, `list`, `patched`) | every write op — `patch`, `rollback`, `reload`, `liveEdit`, `eval`, `swap`, `define`, `instantiate` — with a readable error |
+| `debug` (the secondary) | the hot-swap tools: `patch`, `rollback`, `patched`, `reload`, `liveEdit`, `eval` | trace ops |
+
+Omit `role` for the full surface (development default). `attach: false`
+skips self-attaching and returns `handle.upgradeHandler` for the app to
+hand to its own upgrade router (see infer-debug below). With no options at
+all the channel keeps its standalone listener for apps without a router.
+
+### Usage with infer-debug
+
+With [infer-debug](https://github.com/wentout/infer-debug), one pod
+exposes one port, and infer-debug is the single upgrade decision point on
+the app's server:
+
+```javascript
+const core = new InferDebugCore({
+	childPortEnvVar   : 'APP_PORT',
+	wsRelay           : ['/strategy'],
+	appUpgradeHandler : (req, socket) => strategyUpgrade(req, socket),
+});
+// …
+const channel = await startStrategyClient({
+	server : httpServer,
+	path   : '/strategy',
+	role   : isMain ? 'observer' : 'debug',
+	attach : false,
+});
+strategyUpgrade = channel.upgradeHandler;
+core.attachServer(httpServer);
+```
+
+Routing: the uuid-shaped inspector path tunnels to the secondary's
+inspector (DevTools); an upgrade carrying the `infer-debug` header on a
+`wsRelay` path is relayed wholesale to the secondary (header consumed); an
+upgrade carrying the header on any other path is served by the main app
+with one log line; unmarked upgrades go to the main app. Marked relay
+upgrades get a clean `503` while the secondary is down. The agent's client
+sends the mark on its own connection:
+
+```javascript
+const session = await WSSession.connect(host, port, token, '/strategy', {
+	'infer-debug' : '1',
+});
+```
+
+### Mode 1 — live patch session (mnemonica types)
+
+`patch {path, body}` replaces the construct handler of an EXISTING type
+in place: the constructor identity never changes — captured references and
+previously built instances keep working, the next construction runs the
+new handler. `rollback {path}` pops one step (two patches, one rollback →
+the first patch is active again); `rollback {path, all:true}` or
+`{all:true}` restores the original exactly; `patched` lists paths with
+stack depth and sources. Every patch gets an automatic, unique
+`//# sourceURL=strategy-patch/<Type>@<n>.js` so DevTools lists and
+searches each version separately. Unmarked requests never see a patch; the
+released behaviour is always one rollback away.
+
+### Mode 2 — module reload with compiled JS
+
+Only JS runs: the app is its built package, compiled with
+`inlineSourceMap` + `inlineSources` so every built file carries its own
+map. The agent edits the TypeScript source LOCALLY, compiles that one
+module with the app's `tsconfig`, and sends the result over the channel.
+
+`reload {module, code}` — primary mechanism:
+
+- The code is evaluated under the module's real filename with a `?v=N`
+  suffix, so DevTools lists each reload separately and the embedded map
+  still shows the TS.
+- During that evaluation `define` is intercepted: types the file declares
+  again keep the SAME type object with only the handler swapped (instances,
+  `lookup()`, subtypes stay connected); new types define normally; a type
+  removed from the file stays declared (types cannot be undeclared).
+- Hooks are journaled per module: exactly what the file registered before
+  is removed, what it registers now is kept — two hooks of the same type
+  both stay, other modules' hooks on the same type survive. Two limits:
+  the FIRST reload of a module attributes its original hooks **by
+  source-text match** against the original script (the original load was
+  never watched; when the debugger cannot surface the source, originals
+  linger instead of risking foreign removals — the result says
+  `hookSeeded:false`); hooks a module adds to types it does NOT define are
+  not tracked.
+- Handler swaps are staged and applied only after the module evaluates
+  cleanly: a file that throws leaves everything as it was and consumes no
+  version. The ENTRY module (the process entry point) is refused — that is
+  a full restart. CommonJS only; an ESM module fails with a readable
+  compilation error.
+- The old `module.exports` object is then replaced IN PLACE: in-flight
+  requests finish on the old code, the next request runs the new one.
+  Held references: call sites that read through the exports object (all
+  tsc-compiled imports) see the new code; true destructured
+  `const { fn } = require(...)` bindings keep the old function — that is
+  what `liveEdit` is for.
+
+`liveEdit {module, code}` — explicit fallback: `Debugger.setScriptSource`
+edits the running script in place and reaches even those captured
+bindings. V8's rules apply: the edit must keep the script's structural
+positions (a one-function body or signature change — structural rewrites
+are `reload`'s job), and V8 **refuses while a request is suspended inside
+the old function**: the status (`BlockedByActiveGenerator`) is returned
+verbatim — wait for the request to finish and retry. After a reload, the
+newest `?v=N` script is targeted.
+
+### The agent's workflow (target scenario)
+
+1. Watch the failing request in the secondary (marked requests, traces).
+2. At the failing code, read the scope — the REAL third-party data.
+3. Edit the source locally, run `tsc`, deliver with `reload` (types) /
+   `reload` or `liveEdit` (plain code). No redeployment.
+4. Replay the request until the reply is right.
+5. Report "debugged — commit this" with a regression test built from the
+   payload captured at step 2; or, after repeated rounds, report why not
+   and what the scope showed.
+
+**Data note.** This workflow exposes production data: scopes, traces and
+captured payloads are real user input. Who may open a session and where
+captured data may end up is a policy decision for the team running the
+app; treat every capture as sensitive.
+
 ## Example Workflow
 
 1. Start your Mnemonica application with debug mode:

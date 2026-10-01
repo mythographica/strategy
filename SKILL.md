@@ -98,6 +98,32 @@ merge can drift from the handlers where the builder cannot.
   dive's opt-in model stands; strategy observes what the app wrapped.
 - Do not expose the WS channel off loopback — development instrument.
 
+## Live development: changing a running app in flight
+
+When the task is "the contract changed and the app must bend without a
+redeploy", the loop is: **watch the secondary → read the scope → compile
+locally → deliver through the channel → replay → report**. Mechanics are
+in [README.md](./README.md) ("Live development on a running app"); the
+mindset:
+
+- Change the SECONDARY, never the main process. The main channel is an
+  observer — a write op there is a policy violation, not a shortcut.
+- `patch`/`rollback`/`patched` for mnemonica types (constructor identity
+  is sacred; rollback is always one step away). `reload` for whole
+  modules (compile ONE file locally with the app's tsconfig, send
+  `{module, code}`). `liveEdit` only for shape-preserving one-function
+  edits that must reach stale destructured bindings — and if V8 answers
+  `BlockedByActiveGenerator`, a request is suspended in the old function:
+  let it finish, then retry.
+- Hooks belong to the file that registers them: a reload replaces exactly
+  that file's hooks. Do not "fix" duplicates by hand — that hides journal
+  drift.
+- The entry module cannot be reloaded; if the fix IS the entry module,
+  say so — that is a restart, owned by whoever deploys.
+- Every captured scope and payload is production data. The regression
+  test you build at the end comes from it; where that data may live is a
+  team policy, not your call.
+
 ## Development-time notes
 
 - The target's own `@mnemonica/dive` copy holds the state: a CJS
